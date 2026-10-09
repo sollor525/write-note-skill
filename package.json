@@ -1,0 +1,22 @@
+{
+  "name": "write-notes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "让 AI 改代码前先看见当初为什么这样定：把决策、取舍与被否掉的老路留在仓库里，用脚本门禁保证同步",
+  "scripts": {
+    "verify-agent-note-tree": "npx tsx skills/write-notes/scripts/verify-agent-note-tree.ts",
+    "verify-agent-note-format": "npx tsx skills/write-notes/scripts/verify-agent-note-format.ts",
+    "verify-archived": "npx tsx skills/write-notes/scripts/verify-archived-agent-notes.ts",
+    "verify-notes": "npx tsx skills/write-notes/scripts/verify-agent-note-tree.ts && npx tsx skills/write-notes/scripts/verify-agent-note-format.ts && npx tsx skills/write-notes/scripts/verify-archived-agent-notes.ts",
+    "reseal-notes": "npx tsx skills/write-notes/scripts/verify-archived-agent-notes.ts --reseal",
+    "archive-agent-note": "npx tsx skills/write-notes/scripts/archive-agent-note.ts",
+    "check-anchors": "npx tsx skills/write-notes/scripts/check-note-anchors.ts",
+    "init-board": "npx tsx skills/write-notes/scripts/build-board.ts --init board.html '工程决策看板'",
+    "bundle-board": "npx tsx skills/write-notes/scripts/build-board.ts --bundle .agents/notes demo.html '工程决策看板'",
+    "build-board": "npx tsx skills/write-notes/scripts/build-board.ts --init board.html '工程决策看板'",
+    "export-assets": "bash scripts/export-assets.sh",
+    "test-gates": "node scripts/test-gates.mjs",
+    "test-skill-install": "node scripts/test-skill-install.mjs"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+
+# Generated board artifacts: build them with `npm run init-board` / `bundle-board`.
+board.html
+demo.html
+
+# Scratch host projects created by `npm run test-gates`.
+.gates-scratch/
