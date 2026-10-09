@@ -169,7 +169,14 @@ npm run bundle-board               # pack a self-contained demo.html with all no
 
 The scripts live in this skill's `scripts/` and are invoked from the **host project root**; by default they check `.agents/notes/` under the current directory. Determine the skill's location from the loaded `SKILL.md` path; do not assume the host root has a `scripts/`, and do not `cd` into the skill directory. Installing the skill does not configure the host's npm scripts.
 
-With a project-level install under `.agents/skills/`, you can call them directly:
+**This skill is harness-agnostic**: any agent that can read `SKILL.md` can use it. The note format, directory layout, status words and gate scripts depend on no particular harness. The install location, however, is chosen by the harness — never assume one:
+
+| Harness | Project-level skill directory |
+|---|---|
+| Codex, Gemini CLI, GitHub Copilot, Cursor, OpenCode, … | `.agents/skills/` (the shared, universal directory) |
+| Claude Code, Windsurf | `.claude/skills/`, `.windsurf/skills/` — the installer typically creates a symlink to the universal directory, so both paths show the same content |
+
+So **read the real path before using it** — the location `SKILL.md` was loaded from is the authority. With a project-level install in the universal directory you can call the scripts directly:
 
 ```sh
 npx tsx .agents/skills/write-notes-en/scripts/verify-agent-note-tree.ts
@@ -178,7 +185,7 @@ npx tsx .agents/skills/write-notes-en/scripts/verify-archived-agent-notes.ts
 npx tsx .agents/skills/write-notes-en/scripts/build-board.ts --init board.html "Decision board"
 ```
 
-If the skill is installed under `.claude/skills/` or a global directory, substitute the real path. Board packing takes `--bundle <notes-dir> <output.html> "<name>"`; flags and the immunity rules are in `references/verification.md`.
+Loaded from `.claude/skills/`, a global directory, or anywhere else? Substitute that prefix. Board packing takes `--bundle <notes-dir> <output.html> "<name>"`; flags and the immunity rules are in `references/verification.md`.
 
 For a team, copy this skill's `templates/verify-notes.yml` into the host repository's `.github/workflows/verify-notes.yml`, adjust the paths to the real install location, and commit the project-level skill files alongside it; the template does nothing while it sits inside the skill directory. You can also add "significant changes must ship with a note" to `CONTRIBUTING.md` or the PR template.
 

@@ -1,0 +1,58 @@
+# CI for this repository (the skill's own gates, not a host project's).
+#
+# Two jobs:
+#   gates   — offline: the 50-case regression suite for the gate scripts
+#   install — networked: the real `skills` CLI, so the paths the README promises
+#             (universal .agents/skills/ and Claude Code's .claude/skills/) are
+#             actually verified rather than assumed
+name: verify
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The archive gates need git to anchor their seals. Point the baseline at
+      # the pre-change commit: the PR base, or the previous tip of the pushed
+      # branch. HEAD would compare the tree against itself and prove nothing.
+      - name: Verify note tree, format and archive seals
+        env:
+          AGENT_NOTE_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm run verify-notes
+
+      - name: Gate regression suite (behaviour cases + edition drift guard)
+        run: npm run test-gates
+
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Fetches skills@1.7.1 and tsx, then installs both language editions into
+      # a throwaway host project for Codex, Claude Code, Gemini CLI and Copilot.
+      - name: Install into a scratch host and exercise the gates there
+        run: npm run test-skill-install

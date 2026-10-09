@@ -11,10 +11,10 @@ AI 每天都能帮你交十几个 PR，但每个新会话都是一张白纸，�
 
 仓库里有两个可独立安装的 Skill，**装上哪一个，AI 就用哪种语言跟你对话和写笔记**。两者共用同一套校验逻辑与脚本，只是文档与描述语言不同。
 
-| 你想让 AI 用什么语言 | 安装命令 | 装到 Codex 的落点 |
-|---|---|---|
-| 中文 | `npx skills add sollor525/write-note-skill --skill write-notes` | `.agents/skills/write-notes/` |
-| English | `npx skills add sollor525/write-note-skill --skill write-notes-en` | `.agents/skills/write-notes-en/` |
+| 你想让 AI 用什么语言 | 安装命令 |
+|---|---|
+| 中文 | `npx skills add sollor525/write-note-skill --skill write-notes` |
+| English | `npx skills add sollor525/write-note-skill --skill write-notes-en` |
 
 不加 `--skill` 时安装器会问你装哪个（两个都装也可以）。先看看仓库里有哪些可选：
 
@@ -22,13 +22,44 @@ AI 每天都能帮你交十几个 PR，但每个新会话都是一张白纸，�
 npx skills add sollor525/write-note-skill --list
 ```
 
-**装到 Codex**：落点是宿主项目的 `.agents/skills/<名字>/`（该路径同时被 Codex、Cline、Amp、OpenCode 等 agent 共用）。常用参数：
+## 支持哪些 harness
+
+**本 Skill 与 harness 无关**：它只是一份 `SKILL.md` + 脚本，任何能读技能目录的 agent 都能用。落点由 harness 决定，安装器按它们的约定分发：
+
+| Harness | 项目级技能目录 | 说明 |
+|---|---|---|
+| **Codex**、Gemini CLI、GitHub Copilot、Cursor | `.agents/skills/<名字>/` | 通用目录：这几个 harness 共享同一份，装一次全体生效（安装器自己报的是 `universal: Cursor, Gemini CLI, GitHub Copilot, Codex`） |
+| **Claude Code** | `.claude/skills/<名字>` | 安装器建一个指向通用目录的**符号链接**（Windows 上是 junction），两边看到同一份内容；加 `--copy` 则写真实文件 |
+| Windsurf、Continue、Roo、Trae、Kiro、Goose、Grok、Augment、Qoder 等其他 harness | `.windsurf/skills/`、`.continue/skills/`、`.roo/skills/` 等各自的目录 | 各按自己的约定，安装器自动分发（这几个目录名是从安装器实测出来的） |
+
+`--agent '*'` 只写入**你机器上已存在**的 harness 目录，不会凭空创建一堆没用的目录。
 
 ```bash
-npx skills add sollor525/write-note-skill --skill write-notes --agent codex   # 只装中文版到 Codex
-npx skills add sollor525/write-note-skill --skill write-notes-en --agent codex -g   # 装英文版到用户级 ~/.agents/skills/
-npx skills add sollor525/write-note-skill --skill '*' --agent '*' -y          # 两个语言 × 全部 agent
+# 自动检测你装了哪些 harness 并安装（推荐）
+npx skills add sollor525/write-note-skill --skill write-notes -y
+
+# 只装给 Claude Code
+npx skills add sollor525/write-note-skill --skill write-notes --agent claude-code
+
+# 一次装给多个 harness
+npx skills add sollor525/write-note-skill --skill write-notes --agent codex claude-code cursor gemini-cli
+
+# 已存在的 harness 全装，两个语言都装，无交互
+npx skills add sollor525/write-note-skill --all
+
+# 装到用户级（所有项目可用）
+npx skills add sollor525/write-note-skill --skill write-notes -g
 ```
+
+`--agent` 的取值就是 harness 的标识（`codex`、`claude-code`、`cursor`、`gemini-cli`、`github-copilot`、`opencode`、`windsurf`、`continue`、`roo`… ），`'*'` 表示全部。完整清单以安装器为准：
+
+```bash
+npx skills@1.7.1 add --help
+```
+
+> **团队场景建议加 `--copy`**：默认模式下 Claude Code 拿到的是**符号链接**。符号链接不进 git，而且部分 harness 读技能文件时不跟随链接。加 `--copy` 会把真实文件写进各 harness 目录，便于提交和 CI；缺点是同一份内容会在 `.agents/skills/` 与 `.claude/skills/` 各存一份。
+>
+> Windows 上还有个额外理由：创建符号链接需要开发者模式或管理员权限，没有权限时安装器可能退回复制（或失败）。要可复现就用 `--copy`。
 
 📺 先看效果：`npm run bundle-board` 生成的自包含 `demo.html`，双击即可脱机浏览全部笔记。
 
@@ -257,7 +288,7 @@ npx tsx .agents/skills/write-notes/scripts/check-note-anchors.ts
 ### 装上 Skill 之后
 
 ```bash
-npx skills add sollor525/write-note-skill --skill write-notes --agent codex
+npx skills add sollor525/write-note-skill --skill write-notes -y
 ```
 
 把以下规则加入项目的 `AGENTS.md` 或 `CLAUDE.md`，AI 就会自动遵守（装英文版时把路径换成 `.agents/skills/write-notes-en/SKILL.md`，规则本身可以照抄）：
@@ -348,6 +379,6 @@ npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes
 
 运行 `npm run test-gates` 可直接验证门禁本身：它建一批临时宿主项目，逐条断言这些"本该失败"的情况确实失败——空笔记根目录不放行、中文骨架能通过、点目录不再是隐形通道、归档分类封闭集、封印被改/被删/被手放进来都会红、CRLF 笔记能正常归档且不混行尾、`--write` 无法重封被编辑的内容，以及在 git 基线对照下重封篡改内容会被抓住。它还断言两个语言版本没有跑偏：frontmatter 名字与目录一致、英文版里没有漏译的中文（门禁接受的中文小节别名除外）、共享脚本逐字节相同、两版 SKILL.md 的相对链接都能解析、英文版自己的门禁能跑通英文笔记。这是改门禁或改文档后最该跑的一条命令。
 
-运行 `npm run test-skill-install` 会在临时宿主项目里做一遍安装后的端到端检查：从本仓库本地路径安装到 Codex（`.agents/skills/`）与 Claude Code（`.claude/skills/`）两个目标、核对交付的文件与内容、在宿主里跑三个校验脚本、归档一篇笔记并重新校验、生成两种看板。固定使用 `skills@1.7.1`，覆盖默认链接与 `--copy` 两种方式；需要联网获取 CLI 与 tsx。
+运行 `npm run test-skill-install` 会在临时宿主项目里做一遍安装后的端到端检查：从本仓库本地路径安装到 Codex / Gemini CLI 等共用的 `.agents/skills/`，以及 Claude Code 的 `.claude/skills/`，核对交付的文件与内容、断言 Claude Code 拿到的确实是指向通用目录的链接、在宿主里跑三个校验脚本、归档一篇笔记并重新校验、生成两种看板。固定使用 `skills@1.7.1`，覆盖默认链接与 `--copy` 两种方式；需要联网获取 CLI 与 tsx。
 
 > 该检查用的是**本地路径**安装，并不覆盖 `npx skills add sollor525/write-note-skill` 这条远程简写；远程安装请在真实宿主项目里跑一次上面「选语言安装」里的命令确认。

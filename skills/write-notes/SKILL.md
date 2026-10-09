@@ -169,7 +169,14 @@ npm run bundle-board               # 打包内嵌全量数据的自包含 demo.h
 
 脚本位于本 Skill 的 `scripts/`，从**宿主项目根目录**调用，默认检查当前目录下的 `.agents/notes/`。先根据已加载的 `SKILL.md` 路径确定 Skill 位置，不要假定宿主根目录存在 `scripts/`，也不要切换到 Skill 目录执行。安装不会自动配置宿主的 npm scripts。
 
-项目级安装到 `.agents/skills/` 时，可直接执行：
+**本 Skill 与具体 harness 无关**，任何能读 `SKILL.md` 的 agent 都能用：笔记格式、目录结构、状态词和门禁脚本都不依赖某个 harness。安装落点由 harness 决定，不要假定某一个：
+
+| Harness | 项目级技能目录 |
+|---|---|
+| Codex、Gemini CLI、GitHub Copilot、Cursor、OpenCode 等 | `.agents/skills/`（通用目录，多个 harness 共享） |
+| Claude Code、Windsurf | `.claude/skills/`、`.windsurf/skills/`——安装器通常建一个指向通用目录的符号链接，所以两边内容一致 |
+
+因此**先看实际路径再用**（`SKILL.md` 自己被加载的位置就是权威答案）。项目级安装到通用目录时可直接执行：
 
 ```sh
 npx tsx .agents/skills/write-notes/scripts/verify-agent-note-tree.ts
@@ -178,7 +185,7 @@ npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts
 npx tsx .agents/skills/write-notes/scripts/build-board.ts --init board.html "项目决策看板"
 ```
 
-安装到 `.claude/skills/` 或全局目录时，用实际 Skill 路径替换上述前缀。看板打包参数为 `--bundle <notes目录> <输出.html> "名字"`；参数与免疫规则见 `references/verification.md`。
+从 `.claude/skills/`、全局目录或任何其他路径加载时，把上面的前缀换成实际路径即可。看板打包参数为 `--bundle <notes目录> <输出.html> "名字"`；参数与免疫规则见 `references/verification.md`。
 
 团队可将本 Skill 的 `templates/verify-notes.yml` 复制到宿主仓库 `.github/workflows/verify-notes.yml`，调整为实际安装路径，并将项目级 Skill 文件一起提交；模板在 Skill 目录内不会执行。可在 `CONTRIBUTING.md` / PR 模板加一句「重要改动必带一篇笔记」。
 
