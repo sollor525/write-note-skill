@@ -30,12 +30,12 @@ jobs:
         with:
           node-version: 24
 
-      # The archive gates need git to anchor their seals. Point the baseline at
-      # the pre-change commit: the PR base, or the previous tip of the pushed
-      # branch. HEAD would compare the tree against itself and prove nothing.
+      # Note there is deliberately no AGENT_NOTE_ARCHIVE_BASE_REF here: this
+      # repository has no archived notes yet, so the append-only comparison is a
+      # no-op. Once a note is archived, add the env back and point it at the
+      # pre-change commit (PR base, or github.event.before) -- see the template
+      # in skills/write-notes/templates/verify-notes.yml for the exact form.
       - name: Verify note tree, format and archive seals
-        env:
-          AGENT_NOTE_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run verify-notes
 
       - name: Gate regression suite (behaviour cases + edition drift guard)
