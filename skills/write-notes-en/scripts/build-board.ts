@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ALTERNATIVES_NAMES, SECTIONS } from './note-sections.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,6 +36,19 @@ function checkTargetSafety(targetPath: string) {
   }
 }
 
+const TITLE_SENTINEL = 'id="brand-project-title">工程决策看板<';
+const DATA_SENTINEL = 'window.__INLINE_DATA__ = null;';
+
+/** Replace a template sentinel, failing loudly instead of silently doing nothing. */
+function inject(template: string, sentinel: string, replacement: string, what: string): string {
+  if (!template.includes(sentinel)) {
+    console.error(`❌ Template is missing the ${what} sentinel (${JSON.stringify(sentinel)}).`);
+    console.error(`   ${templatePath} no longer matches what this script expects; refusing to emit a board that silently ignores it.`);
+    process.exit(1);
+  }
+  return template.replace(sentinel, () => replacement);
+}
+
 if (isInitMode) {
   const targetPath = cleanArgs[0] ? resolve(cleanArgs[0]) : resolve(process.cwd(), 'board.html');
   const projectName = cleanArgs[1] || 'Decision Board';
@@ -42,7 +56,7 @@ if (isInitMode) {
   checkTargetSafety(targetPath);
 
   let template = readFileSync(templatePath, 'utf8');
-  template = template.replace('id="brand-project-title">工程决策看板<', () => `id="brand-project-title">${projectName}<`);
+  template = inject(template, TITLE_SENTINEL, `id="brand-project-title">${projectName}<`, 'project title');
 
   writeFileSync(targetPath, template, 'utf8');
   console.log(`✅ [daily mode] Lightweight board written (only ~69KB): ${targetPath}`);
@@ -53,7 +67,7 @@ if (isInitMode) {
 // Bundle mode: one self-contained file with all note data inlined (e.g. demo.html)
 const notesDir = cleanArgs[0] ? resolve(cleanArgs[0]) : resolve(process.cwd(), '.agents/notes');
 const outputPath = cleanArgs[1] ? resolve(cleanArgs[1]) : resolve(process.cwd(), 'demo.html');
-const projectName = cleanArgs[2] || '工程决策看板';
+const projectName = cleanArgs[2] || 'Decision Board';
 
 checkTargetSafety(outputPath);
 
@@ -97,16 +111,31 @@ function parseNoteContent(raw: string, relPath: string, slugToId: Map<string, st
   const h1Match = /^# Agent Note[^:：]*[:：]\s*(.*)$/m.exec(parseable);
   if (h1Match) title = h1Match[1].trim();
 
-  function extractSection(secNamePattern: string) {
-    const re = new RegExp(`^## (?:${secNamePattern})\\s*\\n+([\\s\\S]*?)(?=^## |\\s*$)`, 'm');
+  /**
+   * Extract a whole section: everything from the heading to the next `## `
+   * heading (or end of note).
+   *
+   * The lookahead must NOT include an empty-line alternative. `\s*$` under the
+   * `m` flag matches at every line end, so the old pattern stopped at the first
+   * blank line — every multi-paragraph section was silently truncated to its
+   * opening paragraph, which is usually the paragraph carrying the actual
+   * reasoning.
+   */
+  function extractSection(names: readonly string[]): string {
+    const alternatives = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const re = new RegExp(`^## (?:${alternatives})[（(]?[^\\n]*\\n([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`, 'm');
     const m = re.exec(parseable);
-    return m ? m[1].trim() : '';
+    return m ? m[1]!.trim() : '';
   }
 
-  const problem = extractSection('Problem|问题');
-  const decision = extractSection('Decision|Proposal|决策|提案');
-  const alternatives = extractSection('Alternatives considered|曾考虑的替代方案|曾考虑的备选');
-  const consequences = extractSection('Consequences|后果');
+  // Section names come from the shared registry, so the board can never drift
+  // from the format gate. It used to keep its own list, which had already
+  // diverged ("曾考虑的替代方案" vs the gate's "已考虑的替代方案") and was missing
+  // three aliases outright — notes the gate accepted rendered as empty on the board.
+  const problem = extractSection([...SECTIONS.problem]);
+  const decision = extractSection([...SECTIONS.decision, ...SECTIONS.mandate]);
+  const alternatives = extractSection([...ALTERNATIVES_NAMES]);
+  const consequences = extractSection([...SECTIONS.consequences]);
 
   const links: string[] = [];
   for (const m of parseable.matchAll(/\]\(([^)]+\.md)\)/g)) {
@@ -221,14 +250,11 @@ if (isMetadataOnly) {
 let template = readFileSync(templatePath, 'utf8');
 
 // Inject the project name
-template = template.replace('id="brand-project-title">工程决策看板<', () => `id="brand-project-title">${projectName}<`);
+template = inject(template, TITLE_SENTINEL, `id="brand-project-title">${projectName}<`, 'project title');
 
 // Inject the data
 const jsonSafe = JSON.stringify(notes).replace(/</g, '\\u003c');
-template = template.replace(
-  'window.__INLINE_DATA__ = null;',
-  () => `window.__INLINE_DATA__ = ${jsonSafe};`
-);
+template = inject(template, DATA_SENTINEL, `window.__INLINE_DATA__ = ${jsonSafe};`, 'inline data');
 
 writeFileSync(outputPath, template, 'utf8');
 console.log(`🎉 [bundle done] Board written: ${outputPath}`);

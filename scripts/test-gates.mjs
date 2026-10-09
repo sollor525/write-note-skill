@@ -165,6 +165,16 @@ put("archdeep", ".agents/notes/archived/architecture/deep/2026-01-01-x.md", ARCH
 check("archived nested path rejected", run("archdeep", "verify-archived-agent-notes.ts", ["--write"]), 1);
 
 // ============ 6. the seal bypass is closed ============
+// Establishing a baseline in a repository that has never archived anything must
+// create the archive directory itself. Regression: writing the manifest without
+// creating the directory failed with ENOENT, so the very first `--write` on a
+// fresh repository crashed instead of seeding the seal history.
+mkdirSync(join(BASE, "sealfresh", ".agents", "notes"), { recursive: true });
+put("sealfresh", ".agents/notes/implemented/architecture/2026-01-01-x.md", IMPL("x"));
+check("seal: first --write on a repo with no archived/ succeeds", run("sealfresh", "verify-archived-agent-notes.ts", ["--write"]), 0);
+check("seal: first --write created the manifest", existsSync(join(BASE, "sealfresh", ".agents/notes/archived/manifest.json")) ? 1 : 0, 1);
+check("seal: first --write created the ledger", existsSync(join(BASE, "sealfresh", ".agents/notes/archived/.seal-ledger.json")) ? 1 : 0, 1);
+
 put("seal", ".agents/notes/archived/architecture/2026-01-01-a.md", ARCH("ORIGINAL."));
 check("seal: first --write establishes a baseline", run("seal", "verify-archived-agent-notes.ts", ["--write"]), 0);
 check("seal: clean verify", run("seal", "verify-archived-agent-notes.ts"), 0);
@@ -198,7 +208,86 @@ led3.entries[0].seal = "sha256:" + "0".repeat(64);
 writeFileSync(ledger3, JSON.stringify(led3, null, 2), "utf8");
 check("seal: edited ledger seal detected", run("seal3", "verify-archived-agent-notes.ts"), 1);
 
-// ============ 7. the archive CLI: CRLF, link placement, --strict ============
+// Archiving OUT OF filename-date order must not break the ledger's own chain.
+// The chain is defined over the ledger's sorted key order, so appending a note
+// whose key sorts earlier has to re-chain from that position. Regression: the
+// ledger used to be chained in arrival order and then sorted on write, so the
+// file on disk described a chain that verification immediately rejected —
+// i.e. archiving a second note could make the history report itself tampered.
+put("sealorder", ".agents/notes/implemented/architecture/2026-01-01-newer.md", IMPL("newer"));
+put("sealorder", ".agents/notes/implemented/architecture/2025-06-01-older.md", IMPL("older"));
+check("seal order: archive the newer note first", run("sealorder", "archive-agent-note.ts", [
+  ".agents/notes/implemented/architecture/2026-01-01-newer.md",
+]), 0);
+check("seal order: archive the older note second", run("sealorder", "archive-agent-note.ts", [
+  ".agents/notes/implemented/architecture/2025-06-01-older.md",
+]), 0);
+check("seal order: chain survives out-of-order archiving", run("sealorder", "verify-archived-agent-notes.ts"), 0);
+check("seal order: ledger is stored in sorted key order", (() => {
+  const led = JSON.parse(readFileSync(join(BASE, "sealorder", ".agents/notes/archived/.seal-ledger.json"), "utf8"));
+  const keys = led.entries.map((e) => e.key);
+  const sorted = [...keys].sort((a, b) => a.localeCompare(b));
+  return keys.join("|") === sorted.join("|") ? 1 : 0;
+})(), 1);
+
+// The archive CLI must accept every status form the format gate accepts.
+put("sealzh", ".agents/notes/implemented/architecture/2025-02-02-zh.md",
+  "# Agent Note: 中文笔记\n\n状态：已实现\n\n## 问题\n\nP.\n\n## 决策\n\nD.\n\n## 备选方案\n\n- **A** — b.\n\n## 后果\n\nC.\n");
+check("seal zh: format gate accepts the Chinese status line", run("sealzh", "verify-agent-note-format.ts"), 0);
+check("seal zh: archive CLI accepts the same note", run("sealzh", "archive-agent-note.ts", [
+  ".agents/notes/implemented/architecture/2025-02-02-zh.md",
+]), 0);
+
+// ============ 7. the board: multi-paragraph sections and alias parity ============
+// The board reads sections with its own regex and its own vocabulary. Both used
+// to be wrong: the lookahead matched an empty line, truncating every
+// multi-paragraph section to its first paragraph, and the vocabulary had drifted
+// from the gate ("曾考虑的替代方案" instead of "已考虑的替代方案") while missing three
+// aliases — so notes the gate accepted rendered as empty on the board.
+put("boardfix", ".agents/notes/implemented/architecture/2026-04-01-multi.md", `${HEAD("multi paragraph", "implemented")}
+## Problem
+
+First paragraph of the problem.
+
+Second paragraph carries the actual reasoning.
+
+## Decision
+
+Decision first line.
+
+Decision second paragraph.
+
+## 已考虑的替代方案
+
+- **Option A** — strong case, rejected on cost.
+
+## Consequences
+
+Cost first.
+
+Benefit second.
+`);
+{
+  const r = spawnSync(process.execPath, [join(SCRIPTS, "build-board.ts"), "--bundle", ".agents/notes", "demo.html", "Board fix"], {
+    cwd: join(BASE, "boardfix"),
+    env: { ...process.env, AGENT_NOTE_ROOT: join(BASE, "boardfix", ".agents", "notes") },
+    stdio: "inherit",
+  });
+  check("board: bundle builds", r.status, 0);
+  const html = readFileSync(join(BASE, "boardfix", "demo.html"), "utf8");
+  const m = /window\.__INLINE_DATA__ = (\[[\s\S]*?\]);/.exec(html);
+  check("board: inline data present", m ? 1 : 0, 1);
+  if (m) {
+    const data = JSON.parse(m[1].replace(/\\u003c/g, "<"));
+    const n = data[0];
+    check("board: keeps the 2nd paragraph of Problem", n.problem.includes("Second paragraph carries") ? 1 : 0, 1);
+    check("board: keeps the 2nd paragraph of Decision", n.decision.includes("Decision second paragraph") ? 1 : 0, 1);
+    check("board: keeps both paragraphs of Consequences", n.consequences.includes("Cost first") && n.consequences.includes("Benefit second") ? 1 : 0, 1);
+    check("board: reads an alias the gate accepts (## 已考虑的替代方案)", n.alternatives.includes("Option A") ? 1 : 0, 1);
+  }
+}
+
+// ============ 8. the archive CLI: CRLF, link placement, --strict ============
 put("crlf", ".agents/notes/implemented/process/2026-05-01-crlf.md", IMPL("crlf note").replace(/\n/g, "\r\n"));
 put("crlf", ".agents/notes/implemented/process/2026-05-02-succ.md", PROP("succ"));
 check("archive: CRLF note archives", run("crlf", "archive-agent-note.ts", [
@@ -221,7 +310,7 @@ const succ = join(BASE, "crlf", ".agents/notes/implemented/process/2026-05-02-su
 check("archive: successor link inserted before the final section", (() => {
   if (!existsSync(succ)) return 0;
   const lines = readFileSync(succ, "utf8").replace(/\r\n/g, "\n").split("\n");
-  const linkIdx = lines.findIndex((l) => l.includes("历史快照"));
+  const linkIdx = lines.findIndex((l) => /Historical snapshot:|历史快照：/.test(l));
   const lastH2 = lines.reduce((acc, l, i) => (l.startsWith("## ") ? i : acc), -1);
   return linkIdx !== -1 && lastH2 !== -1 && linkIdx < lastH2 && lines[lastH2] === "## Risks" ? 1 : 0;
 })(), 1);
@@ -248,45 +337,75 @@ check("archive: --strict fails while inbound links remain", run("strict", "archi
   ".agents/notes/implemented/architecture/2026-01-01-old.md", "--strict",
 ]), 1);
 
-// ============ 8. the git baseline guard ============
-const gh = "gitguard";
-mkdirSync(join(BASE, gh), { recursive: true });
-put(gh, ".agents/notes/implemented/architecture/2026-06-01-keep.md", IMPL("keep"));
-put(gh, ".agents/notes/implemented/architecture/2026-06-02-move.md", IMPL("move"));
-git(gh, "init", "-q");
-git(gh, "config", "user.email", "tester@example.com");
-git(gh, "config", "user.name", "tester");
-run(gh, "verify-archived-agent-notes.ts", ["--write"]);
-git(gh, "add", "-A");
-git(gh, "commit", "-qm", "baseline");
-const baseline = git(gh, "rev-parse", "HEAD").stdout.trim();
+// ============ 9. the git baseline guard ============
+// These cases need the verifier to run `git` as a subprocess. Some sandboxes
+// block that (piped child stdio), and "git not executable here" is an
+// environment fact, not a code defect — so probe first and skip loudly rather
+// than reporting a failure that means nothing.
+const gitUsable = (() => {
+  const probe = join(BASE, "git-probe");
+  mkdirSync(probe, { recursive: true });
+  const r = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: probe, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.error || r.status === null) {
+    console.log(`\nSKIP  git baseline cases: cannot execute git from a subprocess here (${r.error?.code ?? "unknown"})`);
+    return false;
+  }
+  return true;
+})();
 
-run(gh, "archive-agent-note.ts", [".agents/notes/implemented/architecture/2026-06-02-move.md"]);
-git(gh, "add", "-A");
-git(gh, "commit", "-qm", "archive move");
-check("git: legitimate archive passes against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 0);
+if (gitUsable) {
+  const gh = "gitguard";
+  mkdirSync(join(BASE, gh), { recursive: true });
+  put(gh, ".agents/notes/implemented/architecture/2026-06-01-keep.md", IMPL("keep"));
+  put(gh, ".agents/notes/implemented/architecture/2026-06-02-move.md", IMPL("move"));
+  put(gh, ".agents/notes/implemented/architecture/2026-06-03-later.md", IMPL("later"));
+  git(gh, "init", "-q");
+  git(gh, "config", "user.email", "tester@example.com");
+  git(gh, "config", "user.name", "tester");
 
-run(gh, "archive-agent-note.ts", [".agents/notes/implemented/architecture/2026-06-01-keep.md"]);
-git(gh, "add", "-A");
-git(gh, "commit", "-qm", "archive keep");
-const archivedKeep = join(BASE, gh, ".agents/notes/archived/architecture/2026-06-01-keep.md");
-writeFileSync(archivedKeep, readFileSync(archivedKeep, "utf8").replace("D.", "REWRITTEN."), "utf8");
-run(gh, "verify-archived-agent-notes.ts", ["--reseal"]);
-check("git: re-sealed tampering caught against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
+  // The baseline must contain a sealed note, otherwise the append-only
+  // comparison has nothing to compare and these cases would assert nothing.
+  run(gh, "archive-agent-note.ts", [".agents/notes/implemented/architecture/2026-06-02-move.md"]);
+  git(gh, "add", "-A");
+  git(gh, "commit", "-qm", "baseline with one sealed note");
+  const baseline = git(gh, "rev-parse", "HEAD").stdout.trim();
+  const manifestPath = join(BASE, gh, ".agents/notes/archived/manifest.json");
 
-const manifestPath = join(BASE, gh, ".agents/notes/archived/manifest.json");
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-delete manifest.files["archived/architecture/2026-06-01-keep.md"];
-writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
-check("git: dropped seal caught against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
+  // Appending a seal whose key sorts AFTER every existing key is the legitimate
+  // growth path: earlier entries keep their exact chain links, so the baseline
+  // comparison must stay quiet. (Archiving a note whose key sorts earlier is an
+  // insertion that necessarily re-chains the tail — that is what the
+  // out-of-order case above covers.)
+  run(gh, "archive-agent-note.ts", [".agents/notes/implemented/architecture/2026-06-03-later.md"]);
+  git(gh, "add", "-A");
+  git(gh, "commit", "-qm", "append a later note");
+  check("git: appending a seal passes against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 0);
 
-put(gh, ".agents/notes/archived/architecture/2026-06-09-forged.md", ARCH("FORGED."));
-const manifest2 = JSON.parse(readFileSync(manifestPath, "utf8"));
-manifest2.files["archived/architecture/2026-06-09-forged.md"] = "sha256:" + "1".repeat(64);
-writeFileSync(manifestPath, JSON.stringify(manifest2, null, 2), "utf8");
-check("git: hand-dropped archived note rejected", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
+  // Re-writing a sealed note and re-sealing it changes one baseline seal.
+  const archivedKeep = join(BASE, gh, ".agents/notes/archived/architecture/2026-06-02-move.md");
+  const originalKeep = readFileSync(archivedKeep, "utf8");
+  writeFileSync(archivedKeep, originalKeep.replace("D.", "REWRITTEN."), "utf8");
+  run(gh, "verify-archived-agent-notes.ts", ["--reseal"]);
+  check("git: re-sealed tampering caught against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
 
-// ============ 9. the two language editions ============
+  // Dropping a key that the baseline has must be caught as a removal.
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  delete manifest.files["archived/architecture/2026-06-03-later.md"];
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  check("git: dropped seal caught against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
+
+  // A note dropped straight into archived/ has no implemented/ source at the
+  // baseline, so it cannot obtain a legitimate seal.
+  put(gh, ".agents/notes/archived/architecture/2026-06-09-forged.md", ARCH("FORGED."));
+  const manifest2 = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest2.files["archived/architecture/2026-06-09-forged.md"] = "sha256:" + "1".repeat(64);
+  writeFileSync(manifestPath, JSON.stringify(manifest2, null, 2), "utf8");
+  check("git: hand-dropped archived note rejected", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
+}
+
+// ============ 10. the two language editions ============
 // Both editions ship inside this repository, so they must be installable
 // independently and must not drift apart. Shared code is duplicated on purpose
 // (the skills CLI copies through symlinks); these checks are what keeps the two

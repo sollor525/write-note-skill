@@ -365,6 +365,20 @@ npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes
 > 两版的 `scripts/` 是同一份实现（对比特例外见下），`npm run test-gates` 会逐字节断言它们没有跑偏。唯一有意不同的是 `build-board.ts`：它会打印面向用户的控制台信息，英文版是英文。
 > 看板界面文案目前只有中文，两版共用同一个 `assets/agent-notes-board.html`。
 
+## 升级说明
+
+`0.1.0` 期间有一个缺陷：封印史按**归档顺序**计算哈希链，却按 key 排序写盘。只要**按文件名日期乱序归档**（很常见——文件名日期是决策首次提出日，与归档日无关），落盘的封印史就不再是一条合法链，下一次 `verify-archived` 会**把你自己项目的历史报成被篡改**并退出 1。
+
+现在链严格按排序顺序定义，乱序归档不再自伤。但如果你在旧版本下乱序归档过，已有的封印史需要显式采纳一次：
+
+```bash
+npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts --reseal
+```
+
+它会逐条打印被改动的条目；确认这些改动只是链重算（内容未变）后提交，并在提交信息里说明原因。若不确定，先 `git diff archived/` 看内容是否真的变了——内容变了才需要单独解释。
+
+同一批修复还包括：归档 CLI 与门禁现在共用同一套状态行语法（此前中文状态行的笔记能过门禁却无法归档）、看板不再把多段落小节截断到第一段、看板与门禁共用同一份小节别名表（此前已漂移，导致门禁放行的笔记在看板上显示为空）。
+
 ## 许可证
 
 [MIT](LICENSE)。

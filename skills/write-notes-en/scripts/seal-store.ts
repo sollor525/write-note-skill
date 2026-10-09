@@ -13,7 +13,7 @@
  * makes it *impossible*. See references/archiving.md.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface Manifest {
@@ -112,35 +112,78 @@ export function verifyChain(ledger: Ledger): {
   return { byKey, tail: prevChain, broken: null, duplicate: null };
 }
 
-/** Append `key` to the ledger (idempotent) and write both files deterministically. */
-export function sealOne(notesRoot: string, archiveDir: string, key: string, seal: string): LedgerEntry {
-  const manifestRead = readManifest(manifestPathIn(archiveDir));
-  const ledgerRead = readLedger(ledgerPathIn(archiveDir));
-  const manifest = manifestRead.invalid ? { version: 1, files: {} } : manifestRead.manifest;
-  const ledger = ledgerRead.invalid ? { version: 1, entries: [] } : ledgerRead.ledger;
+/**
+ * Sealing is expressed as one operation that always leaves the same invariant
+ * behind: **the ledger's stored order is its chain order**, sorted by key.
+ *
+ * That invariant is the whole point. If entries are chained in arrival order and
+ * then sorted on write, the file on disk no longer describes a valid chain, and
+ * the next verification reports its own history as tampered. Archiving two notes
+ * out of filename-date order — an entirely ordinary thing to do, since the
+ * filename date is the day a decision was first proposed, not the day it was
+ * archived — used to trigger exactly that.
+ *
+ * So nothing here ever chains "the entries I just touched"; the chain is always
+ * recomputed across the complete, sorted ledger.
+ */
 
-  manifest.files[key] = seal;
-
-  const { byKey } = verifyChain(ledger);
-  const existing = byKey.get(key);
-  if (existing && existing.seal === seal) {
-    writeLedgerAndManifest(archiveDir, manifest, ledger);
-    return existing;
+/** Merge seals into an existing ledger, preserving the sort-then-chain invariant. */
+function mergeAndRechain(ledger: Ledger, seals: Iterable<readonly [string, string]>): LedgerEntry[] {
+  const touched: LedgerEntry[] = [];
+  for (const [key, seal] of seals) {
+    const existing = ledger.entries.find((e) => e.key === key);
+    if (existing) {
+      existing.seal = seal;
+      touched.push(existing);
+    } else {
+      const entry: LedgerEntry = { key, seal, chain: "" };
+      ledger.entries.push(entry);
+      touched.push(entry);
+    }
   }
-
-  // Replacing an entry changes the chain of everything after it, so rebuild the
-  // chain rather than leaving stale links behind.
-  ledger.entries = ledger.entries.filter((e) => e.key !== key);
-  ledger.entries.push({ key, seal, chain: "" });
-  const tail = rechainInPlace(ledger);
-  void tail;
-  writeLedgerAndManifest(archiveDir, manifest, ledger);
-  return ledger.entries.find((e) => e.key === key)!;
+  ledger.entries.sort((a, b) => a.key.localeCompare(b.key));
+  rechainInPlace(ledger);
+  return touched;
 }
 
 /**
- * Recompute every entry's chain link in place, after any change to keys, seals
- * or ordering. Returns the resulting tail.
+ * Record one or more seals and write both files. Idempotent for seals that have
+ * not changed. Returns the resulting ledger entries for the given keys.
+ */
+export function sealEntries(
+  archiveDir: string,
+  manifest: Manifest,
+  seals: Iterable<readonly [string, string]>,
+): LedgerEntry[] {
+  const ledgerRead = readLedger(ledgerPathIn(archiveDir));
+  const ledger = ledgerRead.invalid ? { version: 1, entries: [] } : ledgerRead.ledger;
+
+  const list = [...seals];
+  // A corrupt ledger is a hard error, not something to quietly regenerate: the
+  // callers verify before they get here.
+  if (ledgerRead.invalid) {
+    throw new Error("archived/.seal-ledger.json exists but is not valid JSON; refusing to rebuild the seal history");
+  }
+
+  const touched = mergeAndRechain(ledger, list);
+  for (const [key, seal] of list) manifest.files[key] = seal;
+  writeLedgerAndManifest(archiveDir, manifest, ledger);
+  return touched;
+}
+
+/** Convenience wrapper for the single-note case (the archive CLI). */
+export function sealOne(archiveDir: string, key: string, seal: string): LedgerEntry {
+  const manifestRead = readManifest(manifestPathIn(archiveDir));
+  if (manifestRead.invalid) {
+    throw new Error("archived/manifest.json exists but is not valid JSON; refusing to rebuild the seal index");
+  }
+  return sealEntries(archiveDir, manifestRead.manifest, [[key, seal]])[0]!;
+}
+
+/**
+ * Recompute every entry's chain link in place for the ledger's *current* order.
+ * Callers that reorder or edit seals must call this — or better, go through
+ * `sealEntries`, which cannot forget.
  */
 export function rechainInPlace(ledger: Ledger): string {
   let prev = "";
@@ -151,8 +194,17 @@ export function rechainInPlace(ledger: Ledger): string {
   return prev;
 }
 
+/** Write both files. The ledger must already be sorted and chained. */
 export function writeLedgerAndManifest(archiveDir: string, manifest: Manifest, ledger: Ledger): void {
-  ledger.entries.sort((a, b) => a.key.localeCompare(b.key));
+  const sortedKeys = [...ledger.entries].sort((a, b) => a.key.localeCompare(b.key)).map((e) => e.key);
+  const actualKeys = ledger.entries.map((e) => e.key);
+  if (sortedKeys.join("\u0000") !== actualKeys.join("\u0000")) {
+    throw new Error("internal: ledger entries are not in sorted key order; the chain would not match the file on disk");
+  }
+  // The archive directory may not exist yet: `--write` on a repository with no
+  // archived notes establishes the baseline, and that is the first thing to
+  // create the directory. Writing without this used to fail with ENOENT.
+  mkdirSync(archiveDir, { recursive: true });
   const files = Object.fromEntries(Object.entries(manifest.files).sort(([a], [b]) => a.localeCompare(b)));
   writeFileSync(manifestPathIn(archiveDir), JSON.stringify({ version: 1, files }, null, 2) + "\n", "utf8");
   writeFileSync(ledgerPathIn(archiveDir), JSON.stringify({ version: 1, entries: ledger.entries }, null, 2) + "\n", "utf8");

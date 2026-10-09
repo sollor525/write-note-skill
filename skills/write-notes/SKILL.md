@@ -92,7 +92,7 @@ Status: <状态>
 - `implemented`：`## Problem` → `## Decision`（现在时） → …自由节… → `## Alternatives considered` → `## Consequences`
 - `rejected`：冻结的 proposal 形态，结论在 `Status:` 行
 
-> 备选方案必填：只记录真实考虑过的对手方案，先写它最强的理由再否定。没有过的选项不要编。「不做 / 复用现状」仅当当时真的权衡过才写。脚本只检查有没有 `## Alternatives considered`（或 `## 备选方案` / `## 已考虑的替代方案` / `## 备选`）。
+> 备选方案必填：只记录真实考虑过的对手方案，先写它最强的理由再否定。没有过的选项不要编。「不做 / 复用现状」仅当当时真的权衡过才写。脚本只检查有没有 `## Alternatives considered`（或到目前接受的中文别名：`## 替代方案` / `## 已考虑的替代方案` / `## 备选方案` / `## 备选`，权威清单见 `scripts/note-sections.ts`）。
 > 首节必须是 `## Problem` 或 `## 问题`——中文骨架整篇可用（`## 问题` / `## 决策` / `## 备选方案` / `## 后果` 都能过门禁）。`implemented` 的 `## Decision` 用现在时；门禁只拒提案标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria` 及其中文别名）。展开见 `references/note-format.md`。
 
 模板见 `templates/`。

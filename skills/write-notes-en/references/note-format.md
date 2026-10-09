@@ -68,4 +68,4 @@ The header title accepts a fullwidth colon (`# Agent Note：<Title>` — Chinese
 - Keep searchable mechanism names and `must`/`may`/`never` temporal emphasis; explain each fact fully in exactly one place and link to it from everywhere else.
 - Cross-note references use relative Markdown links `[topic](../../implemented/architecture/2026-…-….md)`, never bare numbers.
 
-This edition is English-monolingual: the header `Agent Note:` and `Status:` stay in their English original so the scripts can check them, and the body is written in English.
+This edition is written in English. The head block keeps the English originals — `Agent Note:` and `Status:` — because they are format keywords the scripts match on, and the body is English. The gate also accepts the Chinese forms (`状态：已实现`, and the Chinese section names listed above), so a bilingual repository works; this edition simply does not use them.

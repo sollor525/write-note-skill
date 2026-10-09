@@ -17,6 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { AGENT_NOTE_CLASSES, agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
+import { statusIndexOf } from "./note-sections.ts";
 import { sealFile, sealOne } from "./seal-store.ts";
 
 const args = process.argv.slice(2);
@@ -75,12 +76,14 @@ const raw = readFileSync(targetPath, "utf8");
 const eol = eolOf(raw);
 const lines = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
 
-// Match the status line tolerantly: a CRLF file arrives with a trailing \r on
-// every line if the normalization above is ever bypassed, and silently treating
-// that as "not an implemented note" is how the archive path used to break.
-const statusIdx = lines.findIndex((l) => l.trimEnd() === "Status: implemented");
+// Match the status line with the same grammar the format gate accepts, so a
+// note the gate calls implemented can always be archived. The literal
+// `Status: implemented` test rejected the Chinese form (`Status: 已实现`) that
+// the gate accepts.
+const statusIdx = statusIndexOf(lines, "implemented");
 if (statusIdx === -1) {
-  console.error("Error: note must contain `Status: implemented` to be archived");
+  console.error("Error: note must carry an implemented status line the format gate accepts (e.g. `Status: implemented`)");
+  console.error("       run the format gate on this note to see what it expects.");
   process.exit(1);
 }
 
@@ -106,6 +109,13 @@ if (successorPath) {
 
 const oldTitle = (lines[0] ?? "").replace(/^# Agent Note[:：] ?/, "").trim() || basename(filename, ".md");
 
+/**
+ * The cross-link label follows the archived note's own language, not the
+ * tool's. A blanket Chinese label used to be written into English notes, which
+ * no document mentioned. Punctuation follows the language too.
+ */
+const linkLabel = /[\u4e00-\u9fff]/.test(oldTitle) ? "历史快照：" : "Historical snapshot: ";
+
 // 2. Destination, refusing to clobber an existing archived note.
 const archivedDir = join(agentNoteRoot, "archived", cls);
 mkdirSync(archivedDir, { recursive: true });
@@ -124,7 +134,7 @@ console.log(`Moved: ${relToRoot} -> archived/${cls}/${filename}`);
 // 3. Seal it through the shared store, so manifest and append-only ledger can
 // never disagree about what was frozen.
 const key = `archived/${cls}/${filename}`;
-const entry = sealOne(agentNoteRoot, join(agentNoteRoot, "archived"), key, sealFile(agentNoteRoot, key));
+const entry = sealOne(join(agentNoteRoot, "archived"), key, sealFile(agentNoteRoot, key));
 console.log(`Sealed ${key} with ${entry.seal.slice(0, 16)}… (history entry ${entry.chain.slice(0, 16)}…)`);
 
 // 4. Inbound links, resolved as real markdown links relative to each note.
@@ -184,10 +194,10 @@ if (successorPath) {
     const anchor = lastH2 > 0 ? lastH2 : successorLines.length;
     let insertAt = anchor;
     while (insertAt > 0 && successorLines[insertAt - 1]!.trim() === "") insertAt--;
-    successorLines.splice(insertAt, 0, "", `[历史快照：${oldTitle}](${relLink})`);
+    successorLines.splice(insertAt, 0, "", `[${linkLabel}${oldTitle}](${relLink})`);
 
     while (successorLines.length > 0 && successorLines[successorLines.length - 1]!.trim() === "") successorLines.pop();
     writeFileSync(successorPath, `${successorLines.join(successorEol)}${successorEol}`, "utf8");
-    console.log(`Linked from ${successorRel}: [历史快照：${oldTitle}](${relLink})`);
+    console.log(`Linked from ${successorRel}: [${linkLabel}${oldTitle}](${relLink})`);
   }
 }

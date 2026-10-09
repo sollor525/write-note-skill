@@ -3,14 +3,32 @@
  *   A. anchors in source code pointing at notes that do not exist (dangling)
  *   B. implemented notes with zero inbound code anchors (suspected missing anchor)
  * Exit code is always 0 — this is an advisory report, not a gate.
- * Env: AGENT_NOTE_CODE_ROOT (default: cwd) — source root to scan.
+ *
+ * Env:
+ *   AGENT_NOTE_CODE_ROOTS (default: cwd) — one or more source roots to scan,
+ *     separated by the platform path delimiter. Use this to name the code
+ *     directories explicitly. The default scans the current directory, which is
+ *     often the repository root; note trees are still skipped either way,
+ *     because a note is not code.
+ *   AGENT_NOTE_CODE_ROOT (legacy, single root) is still honoured.
+ *
  * Run: npx tsx <skill-dir>/scripts/check-note-anchors.ts
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
 
-const codeRoot = resolve(process.env.AGENT_NOTE_CODE_ROOT || process.cwd());
+// Note trees are not code: anchors live in source files, and descending into
+// `.agents/` would only re-read the notes themselves. This is deliberate, and
+// it is the single place that decision lives — the walker below no longer
+// carves out a `.agents` exception that the skip list immediately overrode.
+const codeRoots = (process.env.AGENT_NOTE_CODE_ROOTS
+  ?? process.env.AGENT_NOTE_CODE_ROOT
+  ?? process.cwd())
+  .split(delimiter)
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .map((p) => resolve(p));
 const CODE_EXT = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
   ".py", ".go", ".rs", ".java", ".kt", ".c", ".cc", ".cpp", ".h", ".hpp",
@@ -27,7 +45,7 @@ const anchorHits = new Map<string, string[]>(); // note rel (from notes root, lo
 const dangling: string[] = [];
 const notePathRefs: string[] = [];
 
-function walk(dir: string, depth: number) {
+function walk(dir: string, depth: number, root: string) {
   if (depth > 12) return;
   let entries;
   try {
@@ -36,15 +54,16 @@ function walk(dir: string, depth: number) {
     return;
   }
   for (const entry of entries) {
-    if (entry.name.startsWith(".") && entry.name !== ".agents") continue;
+    // Skip dot-entries (node_modules, .git, .agents, editor state, …) uniformly.
+    if (entry.name.startsWith(".")) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!SKIP_DIR.has(entry.name)) walk(full, depth + 1);
+      if (!SKIP_DIR.has(entry.name)) walk(full, depth + 1, root);
       continue;
     }
     const dot = entry.name.lastIndexOf(".");
     if (dot === -1 || !CODE_EXT.has(entry.name.slice(dot))) continue;
-    const rel = full.slice(codeRoot.length + 1);
+    const rel = full.slice(root.length + 1);
     const lines = readFileSync(full, "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
@@ -66,7 +85,13 @@ function walk(dir: string, depth: number) {
   }
 }
 
-walk(codeRoot, 0);
+for (const root of codeRoots) {
+  if (!existsSync(root)) {
+    console.warn(`warning: source root does not exist, skipped: ${root}`);
+    continue;
+  }
+  walk(root, 0, root);
+}
 
 // implemented notes with zero inbound anchors
 const { notes } = walkAgentNoteTree();
@@ -86,7 +111,7 @@ for (const n of implemented) {
   if (!direct && (bySlug.length === 0 || (slugCount.get(slug) ?? 0) > 1)) unanchored.push(n.rel);
 }
 
-console.log(`scanned: ${codeRoot}`);
+console.log(`scanned: ${codeRoots.join(", ")}`);
 console.log(`anchors found: ${[...anchorHits.values()].reduce((a, b) => a + b.length, 0)} across ${anchorHits.size} note(s)`);
 if (notePathRefs.length) {
   console.log(`\n[anchors without note path] ${notePathRefs.length}`);

@@ -92,7 +92,7 @@ The status must match the lifecycle folder the note sits in (`rejected` carries 
 - `implemented`: `## Problem` → `## Decision` (present tense) → …free sections… → `## Alternatives considered` → `## Consequences`
 - `rejected`: the frozen proposal shape, with the verdict on the `Status:` line
 
-> Alternatives are mandatory: record only the rival options genuinely considered, and state each one's strongest case before rejecting it. Never invent an option that was not on the table. "Do nothing / keep the status quo" counts only if it was actually weighed. The script only checks that the section exists (`## Alternatives considered`, or the accepted Chinese aliases `## 备选方案` / `## 已考虑的替代方案` / `## 备选`).
+> Alternatives are mandatory: record only the rival options genuinely considered, and state each one's strongest case before rejecting it. Never invent an option that was not on the table. "Do nothing / keep the status quo" counts only if it was actually weighed. The script only checks that the section exists (`## Alternatives considered`, or the Chinese aliases accepted so far: `## 替代方案` / `## 已考虑的替代方案` / `## 备选方案` / `## 备选` — the authoritative list is `scripts/note-sections.ts`).
 > The first section must be `## Problem` (Chinese `## 问题` is also accepted, and a fully Chinese skeleton passes the gate: `## 问题` / `## 决策` / `## 备选方案` / `## 后果`). `## Decision` in an `implemented` note is present tense. The gate rejects only proposal-era headings (`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria` and their Chinese aliases). Details in `references/note-format.md`.
 
 Templates are in `templates/`.

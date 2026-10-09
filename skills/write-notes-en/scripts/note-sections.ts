@@ -69,6 +69,20 @@ export function isAlternativesName(bareName: string): boolean {
   return (ALTERNATIVES_NAMES as readonly string[]).includes(bareName);
 }
 
+/**
+ * Index of the note's status line, matching the same grammar the format gate
+ * accepts (English or Chinese, halfwidth or fullwidth colon).
+ *
+ * The archive tool used to test `line === "Status: implemented"` literally. A
+ * note written with the Chinese form passed the format gate but could never be
+ * archived — the gate and the archiver disagreed about what a valid note is.
+ */
+export function statusIndexOf(lines: readonly string[], lifecycle: string): number {
+  const grammar = statusGrammarFor(lifecycle);
+  if (!grammar) return -1;
+  return lines.findIndex((line) => grammar.test(line.trimEnd()));
+}
+
 export function statusGrammarFor(lifecycle: string): RegExp | undefined {
   return STATUS_GRAMMAR[lifecycle];
 }

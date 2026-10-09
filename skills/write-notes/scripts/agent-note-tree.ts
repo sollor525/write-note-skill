@@ -34,7 +34,6 @@ export const agentNoteRoot = resolveAgentNoteRoot()
 const AGENT_NOTE_LIFECYCLES = ['proposed', 'implemented', 'rejected'] as const
 export const AGENT_NOTE_CLASSES = ['feature', 'bug-fix', 'simplification', 'architecture', 'process', 'testing'] as const
 export const AGENT_NOTE_ARCHIVE = 'archived'
-const ROOT_ALLOWLIST = new Set(['AGENTS.md', 'CLAUDE.md'])
 
 export interface AgentNote {
   lifecycle: string
@@ -58,7 +57,6 @@ export function walkAgentNoteTree(): { notes: AgentNote[]; errors: string[] } {
   for (const lifecycle of AGENT_NOTE_LIFECYCLES) {
     for (const match of listMd(resolve(agentNoteRoot, lifecycle), lifecycle).sort()) {
       const segs = match.split('/')
-      if (segs.length === 2 && ROOT_ALLOWLIST.has(segs[1] ?? '')) continue
       // A bilingual pair is allowed: `x.md` plus `x.zh.md`. The variant is
       // validated exactly like its base and must not appear alone, otherwise
       // the suffix would be an unvalidated channel out of the gate.

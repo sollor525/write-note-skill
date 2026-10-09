@@ -37,10 +37,9 @@ import {
   manifestPathIn,
   readLedger,
   readManifest,
-  rechainInPlace,
+  sealEntries,
   sealFile,
   verifyChain,
-  writeLedgerAndManifest,
 } from "./seal-store.ts";
 
 const isWrite = process.argv.includes("--write");
@@ -263,26 +262,25 @@ if (errors.length) {
 }
 
 // --- record new seals
-// Replacing a seal changes every later chain link, so the chain is recomputed
-// rather than appended to; a duplicate entry would break the history's meaning.
+// Recording goes through `sealEntries`, which sorts the ledger and rebuilds the
+// whole chain from that sorted order. Chaining only the entries touched here
+// would leave a file on disk whose chain disagrees with its own order — which
+// happens as soon as a note is archived out of filename-date order.
 if (sealMode) {
-  let added = 0;
-  let changed = 0;
+  const toSeal = new Map<string, string>();
   for (const rel of files) {
     const key = `${AGENT_NOTE_ARCHIVE}/${rel}`;
     const seal = diskSeals.get(key)!;
     const existing = ledger.entries.find((e) => e.key === key);
     if (existing && existing.seal === seal) continue;
-    if (existing) {
-      existing.seal = seal;
-      changed++;
-    } else {
-      ledger.entries.push({ key, seal, chain: "" });
-      added++;
-    }
+    toSeal.set(key, seal);
   }
-  if (added > 0 || changed > 0) rechainInPlace(ledger);
-  writeLedgerAndManifest(archivedDir, manifest, ledger);
+  const added = [...toSeal.keys()].filter((k) => !ledger.entries.some((e) => e.key === k)).length;
+  const changed = toSeal.size - added;
+
+  const touched = sealEntries(archivedDir, manifest, toSeal);
+  for (const entry of touched) manifest.files[entry.key] = entry.seal;
+
   if (added > 0) console.log(`sealed ${added} new history entr${added === 1 ? "y" : "ies"}`);
   if (changed > 0) console.log(`re-adopted ${changed} existing entr${changed === 1 ? "y" : "ies"} (history rewritten deliberately)`);
 }

@@ -18,6 +18,7 @@
     "verify-notes-en": "npx tsx skills/write-notes-en/scripts/verify-agent-note-tree.ts && npx tsx skills/write-notes-en/scripts/verify-agent-note-format.ts && npx tsx skills/write-notes-en/scripts/verify-archived-agent-notes.ts",
     "init-board-en": "npx tsx skills/write-notes-en/scripts/build-board.ts --init board.html 'Decision Board'",
     "export-assets": "bash scripts/export-assets.sh",
+    "sync-editions": "node scripts/sync-editions.mjs --write",
     "test-gates": "node scripts/test-gates.mjs",
     "test-skill-install": "node scripts/test-skill-install.mjs"
   }
