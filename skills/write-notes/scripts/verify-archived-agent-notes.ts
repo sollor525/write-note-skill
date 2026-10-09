@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { AGENT_NOTE_ARCHIVE, AGENT_NOTE_CLASSES, agentNoteRoot } from "./agent-note-tree.ts";
+import { statusGrammarFor } from "./note-sections.ts";
 import {
   BOOKKEEPING,
   type Ledger,
@@ -83,11 +84,16 @@ for (const rel of files) {
 // --- head layout: L1 title / L2 blank / L3 Status / L4 Archived / L5 blank
 const TITLE_RE = /^# Agent Note[:：] ?\S/;
 const ARCHIVED_RE = /^Archived: \d{4}-\d{2}-\d{2}$/;
+const IMPLEMENTED_STATUS = statusGrammarFor("implemented")!;
 for (const rel of files) {
   const lines = readFileSync(join(archivedDir, rel), "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
   if (!TITLE_RE.test(lines[0] ?? "")) fail(`${rel} — line 1 must be \`# Agent Note: <title>\``);
   if (lines[1] !== "") fail(`${rel} — line 2 must be blank`);
-  if (lines[2] !== "Status: implemented") fail(`${rel} — line 3 must be \`Status: implemented\``);
+  // The same grammar the format gate accepts, not a literal `Status: implemented`.
+  // The gate and the archive CLI both accept the Chinese form (`状态：已实现`), so
+  // a note archived with it used to pass both and then die here at L3 — a note the
+  // toolchain called legal could never be verified once frozen.
+  if (!IMPLEMENTED_STATUS.test((lines[2] ?? "").trimEnd())) fail(`${rel} — line 3 must carry an implemented status line the format gate accepts (e.g. \`Status: implemented\`)`);
   if (!ARCHIVED_RE.test(lines[3] ?? "")) fail(`${rel} — line 4 must be \`Archived: YYYY-MM-DD\` immediately below Status`);
   if (lines[4] !== "") fail(`${rel} — line 5 must be blank after Archived`);
 }
@@ -211,12 +217,21 @@ if (repoRoot) {
       const baselineLedger = JSON.parse(baselineLedgerRaw) as Ledger;
       const baseEntries = Array.isArray(baselineLedger.entries) ? baselineLedger.entries : [];
       baselineLedgerKeys = new Set(baseEntries.map((e) => e.key));
-      for (let i = 0; i < baseEntries.length; i++) {
-        const was = baseEntries[i]!;
-        const now = ledger.entries[i];
-        if (!now || now.key !== was.key || now.seal !== was.seal || now.chain !== was.chain) {
-          fail(`archived/.seal-ledger.json entry ${i + 1} (${was.key}) differs from ${baseRef}; the seal history is append-only`);
-          break;
+      // Compare by key, not by position. The ledger is stored in sorted key
+      // order and re-chains from any insertion point, so archiving a note whose
+      // key sorts before existing entries legitimately rewrites every chain
+      // link after it and shifts positions — a positional comparison reported
+      // that ordinary operation as tampering, and --reseal does not exempt the
+      // ledger, so there was no legal path through verification at all.
+      // Append-only here means: every baseline (key, seal) pair survives
+      // unchanged; chain self-consistency is verifyChain's job, and a changed
+      // seal is independently caught by the manifest comparison above.
+      for (const was of baseEntries) {
+        const now = ledger.entries.find((e) => e.key === was.key);
+        if (!now) {
+          fail(`archived/.seal-ledger.json entry (${was.key}) present at ${baseRef} is missing now; the seal history is append-only`);
+        } else if (now.seal !== was.seal) {
+          fail(`archived/.seal-ledger.json entry (${was.key}) changed relative to ${baseRef}; the seal history is append-only`);
         }
       }
     } catch {

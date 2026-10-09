@@ -237,6 +237,11 @@ check("seal zh: format gate accepts the Chinese status line", run("sealzh", "ver
 check("seal zh: archive CLI accepts the same note", run("sealzh", "archive-agent-note.ts", [
   ".agents/notes/implemented/architecture/2025-02-02-zh.md",
 ]), 0);
+// The frozen head keeps the status form the gate accepted, so the archived
+// verifier must too. Regression: it required the literal `Status: implemented`
+// at L3, so a note the gate and the archive CLI both called legal died at
+// verify-archived the moment it was frozen.
+check("seal zh: the archived note passes verify-archived", run("sealzh", "verify-archived-agent-notes.ts"), 0);
 
 // ============ 7. the board: multi-paragraph sections and alias parity ============
 // The board reads sections with its own regex and its own vocabulary. Both used
@@ -382,6 +387,14 @@ if (gitUsable) {
   git(gh, "add", "-A");
   git(gh, "commit", "-qm", "append a later note");
   check("git: appending a seal passes against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 0);
+
+  // Inserting a seal whose key sorts BEFORE the existing keys is the ordinary
+  // out-of-order case: it re-chains the tail and shifts positions. Append-only
+  // is by key, not by position — the baseline comparison used to compare entry
+  // by position and reported this legitimate operation as tampering, and since
+  // --reseal does not exempt the ledger, there was no legal path through.
+  run(gh, "archive-agent-note.ts", [".agents/notes/implemented/architecture/2026-06-01-keep.md"]);
+  check("git: inserting a seal that sorts earlier passes against baseline", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 0);
 
   // Re-writing a sealed note and re-sealing it changes one baseline seal.
   const archivedKeep = join(BASE, gh, ".agents/notes/archived/architecture/2026-06-02-move.md");
