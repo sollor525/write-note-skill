@@ -7,11 +7,28 @@
 
 AI 每天都能帮你交十几个 PR，但每个新会话都是一张白纸，看不见仓库里已经立过的规矩。这套方法用写在仓库里的笔记解决这件事；本项目把它做成 Skill，装上就能按同样的方式维护你的项目。
 
+## 选语言安装
+
+仓库里有两个可独立安装的 Skill，**装上哪一个，AI 就用哪种语言跟你对话和写笔记**。两者共用同一套校验逻辑与脚本，只是文档与描述语言不同。
+
+| 你想让 AI 用什么语言 | 安装命令 | 装到 Codex 的落点 |
+|---|---|---|
+| 中文 | `npx skills add sollor525/write-note-skill --skill write-notes` | `.agents/skills/write-notes/` |
+| English | `npx skills add sollor525/write-note-skill --skill write-notes-en` | `.agents/skills/write-notes-en/` |
+
+不加 `--skill` 时安装器会问你装哪个（两个都装也可以）。先看看仓库里有哪些可选：
+
 ```bash
-npx skills add sollor525/write-note-skill
+npx skills add sollor525/write-note-skill --list
 ```
 
-装到 Codex 会落在宿主项目的 `.agents/skills/write-notes/`（该路径同时被 Codex、Cline、Amp、OpenCode 等 agent 共用）；加 `-g` 装到用户级 `~/.agents/skills/`。指定 agent 用 `--agent codex`，多 agent 一次装用 `--agent '*'`。
+**装到 Codex**：落点是宿主项目的 `.agents/skills/<名字>/`（该路径同时被 Codex、Cline、Amp、OpenCode 等 agent 共用）。常用参数：
+
+```bash
+npx skills add sollor525/write-note-skill --skill write-notes --agent codex   # 只装中文版到 Codex
+npx skills add sollor525/write-note-skill --skill write-notes-en --agent codex -g   # 装英文版到用户级 ~/.agents/skills/
+npx skills add sollor525/write-note-skill --skill '*' --agent '*' -y          # 两个语言 × 全部 agent
+```
 
 📺 先看效果：`npm run bundle-board` 生成的自包含 `demo.html`，双击即可脱机浏览全部笔记。
 
@@ -240,10 +257,10 @@ npx tsx .agents/skills/write-notes/scripts/check-note-anchors.ts
 ### 装上 Skill 之后
 
 ```bash
-npx skills add sollor525/write-note-skill --agent codex
+npx skills add sollor525/write-note-skill --skill write-notes --agent codex
 ```
 
-把以下规则加入项目的 `AGENTS.md` 或 `CLAUDE.md`，AI 就会自动遵守：
+把以下规则加入项目的 `AGENTS.md` 或 `CLAUDE.md`，AI 就会自动遵守（装英文版时把路径换成 `.agents/skills/write-notes-en/SKILL.md`，规则本身可以照抄）：
 
 ```markdown
 ## 重要改动必须留笔记
@@ -302,8 +319,11 @@ npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes
 
 ## 仓库导览
 
-- [`SKILL.md`](skills/write-notes/SKILL.md)：装给 AI 的主契约——先判「要不要写」，再谈怎么写。
-- [`templates/`](skills/write-notes/templates/)：`proposed` / `implemented` / `rejected` 三份填空模板。
+两个语言版本结构完全对称，`skills/write-notes-en/` 是同构的英文版：
+
+- [`skills/write-notes/SKILL.md`](skills/write-notes/SKILL.md)：中文版主契约——先判「要不要写」，再谈怎么写。
+- [`skills/write-notes-en/SKILL.md`](skills/write-notes-en/SKILL.md)：英文版主契约，与中文版同构（English edition）。
+- [`templates/`](skills/write-notes/templates/)：`proposed` / `implemented` / `rejected` 三份填空模板（两版各一份，语言对应）。
 - [`scripts/note-sections.ts`](skills/write-notes/scripts/note-sections.ts)：小节名与别名的唯一来源，门禁和文档不会各说各话。
 - [`scripts/seal-store.ts`](skills/write-notes/scripts/seal-store.ts)：封印与只增不改的封印史，归档 CLI 和校验器共用同一套实现。
 - [`references/when-to-write.md`](skills/write-notes/references/when-to-write.md)：什么时候写、什么时候原地改、什么时候归档。
@@ -311,20 +331,23 @@ npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes
 - [`references/quality-gate.md`](skills/write-notes/references/quality-gate.md)：写完笔记后的语义自检清单。
 - [`references/verification.md`](skills/write-notes/references/verification.md)：每个校验脚本在查什么、为什么。
 
+> 两版的 `scripts/` 是同一份实现（对比特例外见下），`npm run test-gates` 会逐字节断言它们没有跑偏。唯一有意不同的是 `build-board.ts`：它会打印面向用户的控制台信息，英文版是英文。
+> 看板界面文案目前只有中文，两版共用同一个 `assets/agent-notes-board.html`。
+
 ## 许可证
 
 [MIT](LICENSE)。
 
 ## 仓库维护与安装内容
 
-可安装内容集中在 `skills/write-notes/`，包含 `SKILL.md`、`references/`、`templates/`、`scripts/` 和看板模板 `assets/agent-notes-board.html`。根目录的 README 配图和配图导出脚本用于维护本仓库。
+可安装内容集中在 `skills/` 下的两个目录：`write-notes/`（中文版）与 `write-notes-en/`（英文版），各含 `SKILL.md`、`references/`、`templates/`、`scripts/` 和看板模板 `assets/agent-notes-board.html`。根目录的 README 配图和配图导出脚本用于维护本仓库。
 
-无需指定 `--skill`：本仓库根目录没有 `SKILL.md`，Skill 放在安装器会递归发现的标准容器目录 `skills/` 下，`skills/write-notes/SKILL.md` 会被自动识别并放入所选 Agent 的安装位置。
+`--skill` 是可选的：本仓库根目录没有 `SKILL.md`，两个 Skill 都放在安装器会递归发现的标准容器目录 `skills/` 下，`--list` 能列出 `write-notes` 与 `write-notes-en`。同一条安装命令下，`--skill write-notes-en` 装英文版、`--skill write-notes` 装中文版、两个都给就都装。
 
-维护本仓库时，在仓库根目录执行 `npm run verify-notes`、`npm run init-board` 或 `npm run bundle-board`；`board.html` 和 `demo.html` 均为生成产物（已在 `.gitignore` 中排除）。下游项目需自行配置上文的 npm scripts。
+维护本仓库时，在仓库根目录执行：中文版用 `npm run verify-notes` / `init-board` / `bundle-board`，英文版用 `npm run verify-notes-en` / `init-board-en`；`board.html` 和 `demo.html` 均为生成产物（已在 `.gitignore` 中排除）。下游项目需自行配置上文的 npm scripts。
 
-运行 `npm run test-gates` 可直接验证门禁本身：它建一批临时宿主项目，逐条断言这些"本该失败"的情况确实失败——空笔记根目录不放行、中文骨架能通过、点目录不再是隐形通道、归档分类封闭集、封印被改/被删/被手放进来都会红、CRLF 笔记能正常归档且不混行尾、`--write` 无法重封被编辑的内容，以及在 git 基线对照下重封篡改内容会被抓住。这是改门禁后最该跑的一条命令。
+运行 `npm run test-gates` 可直接验证门禁本身：它建一批临时宿主项目，逐条断言这些"本该失败"的情况确实失败——空笔记根目录不放行、中文骨架能通过、点目录不再是隐形通道、归档分类封闭集、封印被改/被删/被手放进来都会红、CRLF 笔记能正常归档且不混行尾、`--write` 无法重封被编辑的内容，以及在 git 基线对照下重封篡改内容会被抓住。它还断言两个语言版本没有跑偏：frontmatter 名字与目录一致、英文版里没有漏译的中文（门禁接受的中文小节别名除外）、共享脚本逐字节相同、两版 SKILL.md 的相对链接都能解析、英文版自己的门禁能跑通英文笔记。这是改门禁或改文档后最该跑的一条命令。
 
-运行 `npm run test-skill-install` 会在临时宿主项目里做一遍安装后的端到端检查：从本仓库本地路径安装到 Codex（`.agents/skills/`）与 Claude Code（`.claude/skills/`）两个目标、核对交付的文件与内容、在宿主里跑三个校验脚本、归档一篇笔记并重新校验、生成两种看板。固定使用 `skills@1.7.1`，覆盖默认链接与 `--copy` 两种方式，且不指定 `--skill`；需要联网获取 CLI 与 tsx。
+运行 `npm run test-skill-install` 会在临时宿主项目里做一遍安装后的端到端检查：从本仓库本地路径安装到 Codex（`.agents/skills/`）与 Claude Code（`.claude/skills/`）两个目标、核对交付的文件与内容、在宿主里跑三个校验脚本、归档一篇笔记并重新校验、生成两种看板。固定使用 `skills@1.7.1`，覆盖默认链接与 `--copy` 两种方式；需要联网获取 CLI 与 tsx。
 
-> 该检查用的是**本地路径**安装，并不覆盖 `npx skills add sollor525/write-note-skill` 这条远程简写；远程安装请在真实宿主项目里跑一次上面「装上 Skill 之后」的命令确认。
+> 该检查用的是**本地路径**安装，并不覆盖 `npx skills add sollor525/write-note-skill` 这条远程简写；远程安装请在真实宿主项目里跑一次上面「选语言安装」里的命令确认。

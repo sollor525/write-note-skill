@@ -15,6 +15,8 @@
     "init-board": "npx tsx skills/write-notes/scripts/build-board.ts --init board.html '工程决策看板'",
     "bundle-board": "npx tsx skills/write-notes/scripts/build-board.ts --bundle .agents/notes demo.html '工程决策看板'",
     "build-board": "npx tsx skills/write-notes/scripts/build-board.ts --init board.html '工程决策看板'",
+    "verify-notes-en": "npx tsx skills/write-notes-en/scripts/verify-agent-note-tree.ts && npx tsx skills/write-notes-en/scripts/verify-agent-note-format.ts && npx tsx skills/write-notes-en/scripts/verify-archived-agent-notes.ts",
+    "init-board-en": "npx tsx skills/write-notes-en/scripts/build-board.ts --init board.html 'Decision Board'",
     "export-assets": "bash scripts/export-assets.sh",
     "test-gates": "node scripts/test-gates.mjs",
     "test-skill-install": "node scripts/test-skill-install.mjs"

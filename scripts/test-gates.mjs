@@ -12,11 +12,17 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPTS = join(REPO, "skills", "write-notes", "scripts");
-const BASE = join(REPO, ".gates-scratch");
+// Fixtures must live OUTSIDE the repository: the archived-note verifier walks
+// up looking for a git repo, so fixtures inside this repo would silently pick up
+// the repo's own history as their "external baseline" and produce bogus verdicts
+// (both false failures and false passes).
+const BASE = join(tmpdir(), `write-notes-gates-${process.pid}`);
 rmSync(BASE, { recursive: true, force: true });
+mkdirSync(BASE, { recursive: true });
 
 const results = [];
 let failures = 0;
@@ -279,6 +285,123 @@ const manifest2 = JSON.parse(readFileSync(manifestPath, "utf8"));
 manifest2.files["archived/architecture/2026-06-09-forged.md"] = "sha256:" + "1".repeat(64);
 writeFileSync(manifestPath, JSON.stringify(manifest2, null, 2), "utf8");
 check("git: hand-dropped archived note rejected", run(gh, "verify-archived-agent-notes.ts", [], { AGENT_NOTE_ARCHIVE_BASE_REF: baseline }), 1);
+
+// ============ 9. the two language editions ============
+// Both editions ship inside this repository, so they must be installable
+// independently and must not drift apart. Shared code is duplicated on purpose
+// (the skills CLI copies through symlinks); these checks are what keeps the two
+// copies honest.
+const EDITIONS = ["write-notes", "write-notes-en"];
+const skillPath = (edition, ...rest) => join(REPO, "skills", edition, ...rest);
+
+for (const edition of EDITIONS) {
+  check(`${edition}: SKILL.md present`, existsSync(skillPath(edition, "SKILL.md")) ? 1 : 0, 1);
+}
+
+// frontmatter name must match the edition's directory name, or installs collide
+for (const edition of EDITIONS) {
+  const head = readFileSync(skillPath(edition, "SKILL.md"), "utf8").split("\n").slice(0, 5).join("\n");
+  check(`${edition}: frontmatter name matches directory`, new RegExp(`^name:\\s*${edition}\\s*$`, "m").test(head) ? 1 : 0, 1);
+  check(`${edition}: frontmatter has a description`, /^description:\s*\S/m.test(head) ? 1 : 0, 1);
+}
+
+// the English edition must actually be English
+// The English edition must be English — except for the Chinese section-name
+// aliases, which are real identifiers the gates accept and which the English
+// docs must therefore name. Those are allowed; anything else means a missed
+// translation.
+const ALLOWED_CHINESE = new Set([
+  "问题", "决策", "备选方案", "已考虑的替代方案", "备选", "后果", "提议", "方案", "提案",
+  "决定", "影响", "结果", "风险", "验收标准", "验收条件", "接受标准", "计划", "规划", "迁移计划",
+  "替代方案",
+]);
+const strayChinese = (file) => {
+  const text = readFileSync(skillPath("write-notes-en", file), "utf8");
+  const found = new Set();
+  for (const m of text.matchAll(/[\u4e00-\u9fff]+/g)) {
+    if (!ALLOWED_CHINESE.has(m[0])) found.add(m[0]);
+  }
+  return [...found];
+};
+const enStraySkill = strayChinese("SKILL.md");
+check("write-notes-en: SKILL.md has no untranslated Chinese", enStraySkill.length === 0 ? 1 : 0, 1);
+if (enStraySkill.length) console.log(`    untranslated: ${enStraySkill.join(", ")}`);
+const zhText = readFileSync(skillPath("write-notes", "SKILL.md"), "utf8");
+check("write-notes: SKILL.md is in Chinese", /[\u4e00-\u9fff]/.test(zhText) ? 1 : 0, 1);
+
+// Shared, language-neutral files must be byte-identical across editions.
+// build-board.ts is deliberately excluded: it prints user-facing console output,
+// so the English edition carries translated messages.
+const SHARED = [
+  "scripts/agent-note-tree.ts",
+  "scripts/archive-agent-note.ts",
+  "scripts/check-note-anchors.ts",
+  "scripts/note-sections.ts",
+  "scripts/seal-store.ts",
+  "scripts/verify-agent-note-format.ts",
+  "scripts/verify-agent-note-tree.ts",
+  "scripts/verify-archived-agent-notes.ts",
+  "assets/agent-notes-board.html",
+];
+for (const rel of SHARED) {
+  const a = existsSync(skillPath("write-notes", rel));
+  const b = existsSync(skillPath("write-notes-en", rel));
+  if (!a || !b) {
+    check(`shared file present in both editions: ${rel}`, 0, 1);
+    continue;
+  }
+  const same = readFileSync(skillPath("write-notes", rel)).equals(readFileSync(skillPath("write-notes-en", rel)));
+  check(`shared file identical across editions: ${rel}`, same ? 1 : 0, 1);
+}
+
+// every relative link inside either SKILL.md must resolve
+for (const edition of EDITIONS) {
+  const text = readFileSync(skillPath(edition, "SKILL.md"), "utf8");
+  const missing = [];
+  for (const m of text.matchAll(/\]\(([^)#\s]+\.md)\)/g)) {
+    const target = m[1];
+    if (/^https?:/.test(target) || target.includes("…")) continue;
+    if (!existsSync(join(REPO, "skills", edition, target))) missing.push(target);
+  }
+  check(`${edition}: all relative links in SKILL.md resolve`, missing.length === 0 ? 1 : 0, 1);
+  if (missing.length) console.log(`    missing: ${missing.join(", ")}`);
+}
+
+// the English edition's own gates must work on an English note
+put("en", ".agents/notes/implemented/architecture/2026-01-01-en.md", `${HEAD("english edition", "implemented")}
+## Problem
+
+The English edition must pass its own gates.
+
+## Decision
+
+Notes in English use the English section names.
+
+## Alternatives considered
+
+- **Ship one bilingual skill** — the installer copies through symlinks and has no language dimension, so this cannot work.
+
+## Consequences
+
+- **Benefit**: the gate is exercised for this edition.
+- **Cost**: shared code is duplicated and must be kept identical.
+`);
+check("write-notes-en: english note passes the format gate", (() => {
+  const r = spawnSync(process.execPath, [join(REPO, "skills", "write-notes-en", "scripts", "verify-agent-note-format.ts")], {
+    cwd: join(BASE, "en"),
+    env: { ...process.env, AGENT_NOTE_ROOT: join(BASE, "en", ".agents", "notes") },
+    stdio: "inherit",
+  });
+  return r.status;
+})(), 0);
+check("write-notes-en: tree gate runs from its own scripts dir", (() => {
+  const r = spawnSync(process.execPath, [join(REPO, "skills", "write-notes-en", "scripts", "verify-agent-note-tree.ts")], {
+    cwd: join(BASE, "en"),
+    env: { ...process.env, AGENT_NOTE_ROOT: join(BASE, "en", ".agents", "notes") },
+    stdio: "inherit",
+  });
+  return r.status;
+})(), 0);
 
 console.log("\n================ RESULTS ================");
 for (const r of results) console.log(r);
