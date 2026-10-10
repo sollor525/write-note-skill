@@ -1,46 +1,23 @@
-/**
- * Verify frozen archived Agent Notes: head layout, class closed set, sealed
- * content, and the append-only seal history.
- *
- * What this can and cannot prove
- * ------------------------------
- * A seal is `sha256(archived file)`, recorded in an append-only ledger whose
- * entries chain into one another. That makes silent edits, dropped entries and
- * reordered history detectable — but the ledger lives in the same repository,
- * so it is *tamper-evident*, not tamper-proof. Only an external witness settles
- * that: set `AGENT_NOTE_ARCHIVE_BASE_REF` in CI and the append-only rule is
- * enforced against a commit the working tree cannot rewrite.
- *
- * Usage:
- *   npx tsx <skill-dir>/scripts/verify-archived-agent-notes.ts           # verify only
- *   npx tsx <skill-dir>/scripts/verify-archived-agent-notes.ts --write   # verify, then seal newly archived files
- *   npx tsx <skill-dir>/scripts/verify-archived-agent-notes.ts --reseal  # verify, then re-adopt an edited manifest as the new baseline
- *
- * `--write` never re-seals content the ledger already knows about; `--reseal`
- * does, loudly. Neither records anything on top of an already-failing run.
- *
- * Env:
- *   AGENT_NOTE_ARCHIVE_BASE_REF (<ref>, default HEAD) — commit the seal files are
- *     compared against. In CI point this at the pre-change commit
- *     (`pull_request.base.sha`, or `github.event.before` on push). With HEAD it
- *     becomes a no-op as soon as the seal files are committed.
- */
+/** 验证归档头部、分类、磁盘内容、索引、账本及可用的 Git 基线。
+ * --write 仅新增封印；--reseal 显式采纳正文改动，不能修复损坏的账本或绕过历史对比。
+ * 显式 AGENT_NOTE_ARCHIVE_BASE_REF 无法读取时失败；未配置且无 Git 时警告降级。 */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { AGENT_NOTE_ARCHIVE, AGENT_NOTE_CLASSES, agentNoteRoot } from "./agent-note-tree.ts";
 import { statusGrammarFor } from "./note-sections.ts";
 import {
-  BOOKKEEPING,
-  type Ledger,
-  type Manifest,
-  ledgerPathIn,
-  manifestPathIn,
-  readLedger,
-  readManifest,
-  sealEntries,
-  sealFile,
-  verifyChain,
+    BOOKKEEPING,
+    type Ledger,
+    type Manifest,
+    ledgerPathIn,
+    manifestPathIn,
+    readLedger,
+    readManifest,
+    sealEntries,
+    sealFile,
+    sealIndexErrors,
+    verifyChain,
 } from "./seal-store.ts";
 
 const isWrite = process.argv.includes("--write");
@@ -48,256 +25,201 @@ const isReseal = process.argv.includes("--reseal");
 const sealMode = isWrite || isReseal;
 const errors: string[] = [];
 const warnings: string[] = [];
+/** 累积可定位错误，全部验证结束后统一非零退出。 */
 const fail = (msg: string) => { errors.push(msg); };
 
 const archivedDir = join(agentNoteRoot, AGENT_NOTE_ARCHIVE);
 const manifestPath = manifestPathIn(archivedDir);
 const ledgerPath = ledgerPathIn(archivedDir);
 
-// --- collect archived notes, excluding this verifier's own bookkeeping
+// 收集归档文件；封印元数据不作为笔记处理。
 const files: string[] = [];
+/** 递归收集归档 Markdown 的相对路径；读取失败直接抛出，不忽略目录。 */
 function scan(dir: string) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) scan(full);
-    else if (entry.isFile() && entry.name.endsWith(".md")) {
-      const rel = relative(archivedDir, full).split("\\").join("/");
-      if (!BOOKKEEPING.has(rel)) files.push(rel);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) scan(full);
+        else if (entry.isFile() && entry.name.endsWith(".md")) {
+            const rel = relative(archivedDir, full).split("\\").join("/");
+            if (!BOOKKEEPING.has(rel)) files.push(rel);
+        }
     }
-  }
 }
 if (existsSync(archivedDir)) scan(archivedDir);
 
-// --- class closed set: an archived note lives in archived/<class>/
+// 归档笔记仍须位于封闭分类集合内，且路径深度固定。
 const withBase = (rel: string) => rel.replace(/\.zh\.md$/, ".md");
 for (const rel of files) {
-  const segs = withBase(rel).split("/");
-  if (segs.length !== 2) {
-    fail(`${rel} — expected archived/{class}/file.md (got ${segs.length} path segment(s))`);
-    continue;
-  }
-  if (!(AGENT_NOTE_CLASSES as readonly string[]).includes(segs[0]!)) {
-    fail(`${rel} — unknown class folder "${segs[0]}" (allowed: ${AGENT_NOTE_CLASSES.join(", ")})`);
-  }
+    const segs = withBase(rel).split("/");
+    if (segs.length !== 2) {
+        fail(`${rel} — expected archived/{class}/file.md (got ${segs.length} path segment(s))`);
+        continue;
+    }
+    if (!(AGENT_NOTE_CLASSES as readonly string[]).includes(segs[0]!)) {
+        fail(`${rel} — unknown class folder "${segs[0]}" (allowed: ${AGENT_NOTE_CLASSES.join(", ")})`);
+    }
 }
 
-// --- head layout: L1 title / L2 blank / L3 Status / L4 Archived / L5 blank
+// 归档头部依次是标题、空行、状态、归档日期、空行。
 const TITLE_RE = /^# Agent Note[:：] ?\S/;
 const ARCHIVED_RE = /^Archived: \d{4}-\d{2}-\d{2}$/;
 const IMPLEMENTED_STATUS = statusGrammarFor("implemented")!;
 for (const rel of files) {
-  const lines = readFileSync(join(archivedDir, rel), "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
-  if (!TITLE_RE.test(lines[0] ?? "")) fail(`${rel} — line 1 must be \`# Agent Note: <title>\``);
-  if (lines[1] !== "") fail(`${rel} — line 2 must be blank`);
-  // The same grammar the format gate accepts, not a literal `Status: implemented`.
-  // The gate and the archive CLI both accept the Chinese form (`状态：已实现`), so
-  // a note archived with it used to pass both and then die here at L3 — a note the
-  // toolchain called legal could never be verified once frozen.
-  if (!IMPLEMENTED_STATUS.test((lines[2] ?? "").trimEnd())) fail(`${rel} — line 3 must carry an implemented status line the format gate accepts (e.g. \`Status: implemented\`)`);
-  if (!ARCHIVED_RE.test(lines[3] ?? "")) fail(`${rel} — line 4 must be \`Archived: YYYY-MM-DD\` immediately below Status`);
-  if (lines[4] !== "") fail(`${rel} — line 5 must be blank after Archived`);
+    const lines = readFileSync(join(archivedDir, rel), "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+    if (!TITLE_RE.test(lines[0] ?? "")) fail(`${rel} — line 1 must be \`# Agent Note: <title>\``);
+    if (lines[1] !== "") fail(`${rel} — line 2 must be blank`);
+    // 与格式门和归档命令共用状态语法，中文状态行归档后仍然有效。
+    if (!IMPLEMENTED_STATUS.test((lines[2] ?? "").trimEnd())) fail(`${rel} — line 3 must carry an implemented status line the format gate accepts (e.g. \`Status: implemented\`)`);
+    if (!ARCHIVED_RE.test(lines[3] ?? "")) fail(`${rel} — line 4 must be \`Archived: YYYY-MM-DD\` immediately below Status`);
+    if (lines[4] !== "") fail(`${rel} — line 5 must be blank after Archived`);
 }
 
-// --- seal files
+// 两份元数据分别读取；只读校验绝不修补读入内容。
 const manifestRead = readManifest(manifestPath);
 const ledgerRead = readLedger(ledgerPath);
-let manifest: Manifest = manifestRead.invalid ? { version: 1, files: {} } : manifestRead.manifest;
-const ledger: Ledger = ledgerRead.invalid ? { version: 1, entries: [] } : ledgerRead.ledger;
-
-if (manifestRead.invalid) fail("archived/manifest.json exists but is not valid JSON");
-if (ledgerRead.invalid) fail("archived/.seal-ledger.json exists but is not valid JSON");
-if (!manifestRead.exists && files.length > 0 && !sealMode) {
-  fail("archived/manifest.json missing — run with --write to seal existing archived notes");
+const manifest: Manifest = manifestRead.manifest;
+const ledger: Ledger = ledgerRead.ledger;
+if (manifestRead.invalid) fail("archived/manifest.json has invalid JSON or schema");
+if (ledgerRead.invalid) fail("archived/.seal-ledger.json has invalid JSON or schema");
+if (manifestRead.exists && !ledgerRead.exists) fail("archived/.seal-ledger.json missing — restore seal history before continuing");
+if (!manifestRead.exists && ledgerRead.exists) {
+    if (isReseal && !ledgerRead.invalid) {
+        // 唯一的恢复入口是显式 --reseal；索引先从旧账本恢复，仍需验证链及基线。
+        manifest.files = Object.fromEntries(ledger.entries.map((entry) => [entry.key, entry.seal]));
+    } else fail("archived/manifest.json missing while seal history exists — restore it, or use --reseal deliberately");
 }
-
-const chained = verifyChain(ledger);
-if (chained.broken) {
-  fail(`archived/.seal-ledger.json — chain broken at ${chained.broken.key}: ${chained.broken.reason}`);
+if (!manifestRead.exists && !ledgerRead.exists && files.length && !sealMode) {
+    fail("Archive seal files missing — use --write only to establish the first baseline");
 }
-if (chained.duplicate) {
-  fail(`archived/.seal-ledger.json — duplicate entry for ${chained.duplicate}`);
-}
-const ledgerByKey = chained.byKey;
-
-// --- compare every archived note against history, then against the manifest
+errors.push(...sealIndexErrors(manifest, ledger));
 const diskSeals = new Map<string, string>();
 for (const rel of files) {
-  const key = `${AGENT_NOTE_ARCHIVE}/${rel}`;
-  const actual = sealFile(agentNoteRoot, key);
-  diskSeals.set(key, actual);
-
-  const historic = ledgerByKey.get(key);
-  // The ledger is authoritative when it knows the key; the manifest is only a
-  // fallback for repositories older than the ledger.
-  const reference = historic?.seal ?? (manifestRead.exists ? manifest.files[key] : undefined);
-
-  if (reference === undefined) {
-    if (!sealMode) fail(`${key} — missing seal (run --write to seal a newly archived note)`);
-  } else if (reference !== actual) {
-    if (isReseal) {
-      warnings.push(`${key} — re-adopting edited content as the new seal (${reference.slice(0, 16)}… → ${actual.slice(0, 16)}…)`);
-    } else if (historic) {
-      fail(`${key} — seal mismatch against the append-only history: the archived note was modified after sealing. Adopt the edit deliberately with --reseal, and say why in the commit message`);
-    } else {
-      fail(`${key} — seal mismatch: archived note was modified after sealing (frozen notes must never change)`);
+    const key = `${AGENT_NOTE_ARCHIVE}/${rel}`;
+    const actual = sealFile(agentNoteRoot, key);
+    diskSeals.set(key, actual);
+    const reference = manifest.files[key];
+    if (reference === undefined) {
+        if (!sealMode) fail(`${key} — missing seal (run --write to seal a newly archived note)`);
+    } else if (reference !== actual) {
+        if (isReseal) warnings.push(`${key} — re-adopting edited content as the new seal (${reference.slice(0, 16)}… → ${actual.slice(0, 16)}…)`);
+        else fail(`${key} — seal mismatch: archived content changed; --write cannot re-seal it`);
     }
-  }
-
-  // Keep the manifest aligned with history even on a read-only run, so a later
-  // `--write` cannot launder an edit by trusting a stale manifest.
-  if (historic) manifest.files[key] = actual;
+}
+// 索引和账本中的每个条目都必须仍对应文件，不能只从磁盘单向检查。
+for (const key of new Set([...Object.keys(manifest.files), ...ledger.entries.map((entry) => entry?.key)])) {
+    if (!diskSeals.has(key)) fail(`${key} — sealed entry has no archived file on disk`);
 }
 
-for (const key of Object.keys(manifest.files)) {
-  if (!existsSync(join(agentNoteRoot, key))) fail(`${key} — sealed entry has no file on disk`);
-}
-
-// --- nothing may be recorded implicitly on top of a partly-lost history
-// A ledger that survives while the manifest is gone is the dangerous case:
-// rebuilding the manifest then would re-seal whatever is on disk right now.
-// With neither file present this is simply the first run, and --write may
-// establish the baseline; a truly lost ledger is caught against the git
-// baseline below, which is the only witness that cannot be deleted locally.
-if (sealMode && !isReseal && ledgerRead.exists && !manifestRead.exists && files.length > 0) {
-  fail("archived/manifest.json is missing while archived/.seal-ledger.json is present — refusing to rebuild the manifest implicitly, because that is exactly how an edited frozen note gets a fresh seal. Restore it from git, or re-run with --reseal to adopt the current content deliberately.");
-}
-
-// --- append-only vs an external baseline (needs git; degrades loudly without it)
+// 与 Git 提交中的基线比较；显式配置的基线不可用时必须失败。
+/** Git 执行结果；ok 为成功标志，out 为原始输出，reason 保留失败原因。 */
 type GitRun = { ok: true; out: string } | { ok: false; reason: string };
+/** 只读调用 Git，保留失败原因供基线检查决定报错或警告。 */
 const gitAt = (cwd: string, args: string[]): GitRun => {
-  try {
-    return { ok: true, out: execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }) };
-  } catch (e) {
-    const err = e as { code?: string | number; status?: number; stderr?: string };
-    // A non-zero exit is an ordinary "no such ref" answer; a spawn failure
-    // (EPERM/EACCES under a restrictive sandbox) means git never ran at all and
-    // the guard is not merely "not applicable".
-    if (err.code === "EPERM" || err.code === "EACCES" || err.code === "ENOENT") {
-      return { ok: false, reason: `could not execute git (${String(err.code)})` };
+    try {
+        return { ok: true, out: execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }) };
+    } catch (e) {
+        const err = e as { code?: string | number; status?: number; stderr?: string };
+        // 区分子进程无法启动和 Git 返回失败，保留可定位的执行原因。
+        if (err.code === "EPERM" || err.code === "EACCES" || err.code === "ENOENT") {
+            return { ok: false, reason: `could not execute git (${String(err.code)})` };
+        }
+        return { ok: false, reason: `git ${args[0]} exited ${err.status ?? "non-zero"}: ${err.stderr?.toString().trim() ?? String(e)}` };
     }
-    return { ok: false, reason: `git ${args[0]} exited ${err.status ?? "non-zero"}` };
-  }
 };
 
+const explicitBase = process.env.AGENT_NOTE_ARCHIVE_BASE_REF?.trim();
 const discovered = gitAt(agentNoteRoot, ["rev-parse", "--show-toplevel"]);
 const repoRoot = discovered.ok ? discovered.out.trim() : null;
 
-if (repoRoot) {
-  const baseRef = process.env.AGENT_NOTE_ARCHIVE_BASE_REF || "HEAD";
-  const showAtBase = (path: string): string | null => {
-    const rel = relative(repoRoot, path).split("\\").join("/");
-    const run = gitAt(repoRoot, ["show", `${baseRef}:${rel}`]);
-    return run.ok ? run.out : null;
-  };
-
-  const baselineManifestRaw = showAtBase(manifestPath);
-  if (baselineManifestRaw === null) {
-    warnings.push(`no archived/manifest.json at ${baseRef} — append-only comparison skipped`);
-  } else {
-    try {
-      const baseline = JSON.parse(baselineManifestRaw) as Manifest;
-      for (const [key, seal] of Object.entries(baseline.files ?? {})) {
-        if (manifest.files[key] === seal) continue;
-        if (isReseal && key in manifest.files) continue; // deliberately re-adopted
-        if (!(key in manifest.files)) {
-          fail(`${key} — seal present at ${baseRef} but absent now; seals may be added, never removed`);
-        } else {
-          fail(`${key} — seal changed relative to ${baseRef}; archived seals are append-only`);
-        }
-      }
-    } catch {
-      fail(`archived/manifest.json at ${baseRef} was not valid JSON`);
-    }
-  }
-
-  const baselineLedgerRaw = showAtBase(ledgerPath);
-  let baselineLedgerKeys: Set<string> | null = null;
-  if (baselineLedgerRaw !== null) {
-    try {
-      const baselineLedger = JSON.parse(baselineLedgerRaw) as Ledger;
-      const baseEntries = Array.isArray(baselineLedger.entries) ? baselineLedger.entries : [];
-      baselineLedgerKeys = new Set(baseEntries.map((e) => e.key));
-      // Compare by key, not by position. The ledger is stored in sorted key
-      // order and re-chains from any insertion point, so archiving a note whose
-      // key sorts before existing entries legitimately rewrites every chain
-      // link after it and shifts positions — a positional comparison reported
-      // that ordinary operation as tampering, and --reseal does not exempt the
-      // ledger, so there was no legal path through verification at all.
-      // Append-only here means: every baseline (key, seal) pair survives
-      // unchanged; chain self-consistency is verifyChain's job, and a changed
-      // seal is independently caught by the manifest comparison above.
-      for (const was of baseEntries) {
-        const now = ledger.entries.find((e) => e.key === was.key);
-        if (!now) {
-          fail(`archived/.seal-ledger.json entry (${was.key}) present at ${baseRef} is missing now; the seal history is append-only`);
-        } else if (now.seal !== was.seal) {
-          fail(`archived/.seal-ledger.json entry (${was.key}) changed relative to ${baseRef}; the seal history is append-only`);
-        }
-      }
-    } catch {
-      fail(`archived/.seal-ledger.json at ${baseRef} was not valid JSON`);
-    }
-  } else if (!ledgerRead.exists) {
-    warnings.push(`no archived/.seal-ledger.json on disk — cannot check the seal chain against ${baseRef}`);
-  }
-
-  // A seal added since the baseline must correspond to an implemented note that
-  // existed at the baseline: archiving is a move, so the source has to be there.
-  // Without this, a hand-edited note dropped straight into archived/ would get a
-  // perfectly valid seal from --write and look like any other frozen note.
-  if (baselineLedgerKeys) {
-    const treeRun = gitAt(repoRoot, ["ls-tree", "-r", "--name-only", baseRef, "--", ".agents/notes/implemented"]);
-    const implementedAtBase = treeRun.ok
-      ? new Set(treeRun.out.split("\n").map((l) => l.trim()).filter(Boolean))
-      : null;
-
-    if (implementedAtBase) {
-      for (const rel of files) {
-        const key = `${AGENT_NOTE_ARCHIVE}/${rel}`;
-        if (baselineLedgerKeys.has(key)) continue;
-        const source = `.agents/notes/implemented/${withBase(rel)}`;
-        if (!implementedAtBase.has(source)) {
-          fail(`${key} — sealed since ${baseRef} but ${source} did not exist there: archived notes must be moved from implemented/ with archive-agent-note.ts, not dropped in by hand`);
-        }
-      }
-    }
-  }
+if (!repoRoot) {
+    if (explicitBase) fail(`Cannot verify configured archive baseline ${explicitBase}: ${discovered.ok ? "no repository" : discovered.reason}`);
+    else warnings.push(`append-only check skipped (${discovered.ok ? "no repository" : discovered.reason}); no external baseline is available`);
 } else {
-  warnings.push(
-    `append-only check skipped (${discovered.ok ? "no git repository here" : discovered.reason}) — seal hashes and the seal chain are still verified against disk, but nothing is anchoring them to a commit`,
-  );
-  if (!discovered.ok) {
-    warnings.push("if this runs in CI, the external anchor is missing: an archived note could be edited and re-sealed without the run noticing");
-  }
+    const baseRef = explicitBase || "HEAD";
+    const resolvedBase = gitAt(repoRoot, ["rev-parse", "--verify", "--end-of-options", `${baseRef}^{commit}`]);
+    if (!resolvedBase.ok) {
+        if (explicitBase) fail(`Cannot resolve configured archive baseline ${baseRef}: ${resolvedBase.reason}`);
+        else warnings.push("HEAD has no readable commit; only local archive consistency was checked");
+    } else {
+        // 先取得有效提交中的路径清单，区分文件从未存在与读取操作失败。
+        const commit = resolvedBase.out.trim();
+        const notesRel = relative(repoRoot, agentNoteRoot).replace(/\\/g, "/");
+        const tree = gitAt(repoRoot, ["ls-tree", "-r", "-z", "--name-only", commit, "--", notesRel || "."]);
+        if (!tree.ok) fail(`Cannot read archive baseline ${baseRef}: ${tree.reason}`);
+        else {
+            const paths = new Set(tree.out.split("\0").filter(Boolean));
+            /** 只读取基线中确实存在的文件；读取失败保留原因并使本次校验失败。 */
+            const showAtBase = (path: string): string | null => {
+                const rel = relative(repoRoot, path).replace(/\\/g, "/");
+                if (!paths.has(rel)) return null;
+                const result = gitAt(repoRoot, ["show", `${commit}:${rel}`]);
+                if (!result.ok) {
+                    fail(`Cannot read ${rel} at ${baseRef}: ${result.reason}`);
+                    return null;
+                }
+                return result.out;
+            };
+            const baselineManifestRaw = showAtBase(manifestPath);
+            if (baselineManifestRaw !== null) {
+                try {
+                    const baseline = JSON.parse(baselineManifestRaw) as Manifest;
+                    if (baseline.version !== 1 || !baseline.files || Array.isArray(baseline.files)) throw new Error("invalid manifest schema");
+                    for (const [key, seal] of Object.entries(baseline.files)) {
+                        if (manifest.files[key] === seal) continue;
+                        fail(`${key} — seal missing or changed relative to ${baseRef}; archived seals are append-only`);
+                    }
+                } catch (error) {
+                    fail(`Invalid manifest at ${baseRef}: ${String(error)}`);
+                }
+            }
+            const baselineLedgerRaw = showAtBase(ledgerPath);
+            if (baselineLedgerRaw !== null) {
+                try {
+                    const baseline = JSON.parse(baselineLedgerRaw) as Ledger;
+                    if (baseline.version !== 1 || !Array.isArray(baseline.entries)) throw new Error("invalid ledger schema");
+                    const chain = verifyChain(baseline);
+                    if (chain.broken || chain.duplicate) throw new Error("invalid baseline seal chain");
+                    const current = new Map(ledger.entries.map((entry) => [entry.key, entry]));
+                    for (const was of baseline.entries) {
+                        if (current.get(was.key)?.seal !== was.seal) fail(`${was.key} — seal history entry missing or changed relative to ${baseRef}`);
+                    }
+                    // 新归档的来源必须位于实际配置的笔记根目录，而非固定的 .agents/notes。
+                    for (const rel of files) {
+                        if (chain.byKey.has(`${AGENT_NOTE_ARCHIVE}/${rel}`)) continue;
+                        const source = [notesRel, "implemented", withBase(rel)].filter(Boolean).join("/");
+                        if (!paths.has(source)) fail(`${rel} — ${source} did not exist at ${baseRef}; new archives must come from implemented notes`);
+                    }
+                } catch (error) {
+                    fail(`Invalid seal history at ${baseRef}: ${String(error)}`);
+                }
+            }
+        }
+    }
 }
 
 if (errors.length) {
-  for (const e of errors) console.error(`archived: ${e}`);
-  process.exit(1);
+    for (const e of errors) console.error(`archived: ${e}`);
+    process.exit(1);
 }
 
-// --- record new seals
-// Recording goes through `sealEntries`, which sorts the ledger and rebuilds the
-// whole chain from that sorted order. Chaining only the entries touched here
-// would leave a file on disk whose chain disagrees with its own order — which
-// happens as soon as a note is archived out of filename-date order.
+// 全部检查通过后才写封印；按路径排序并重算链，支持任意归档次序。
 if (sealMode) {
-  const toSeal = new Map<string, string>();
-  for (const rel of files) {
-    const key = `${AGENT_NOTE_ARCHIVE}/${rel}`;
-    const seal = diskSeals.get(key)!;
-    const existing = ledger.entries.find((e) => e.key === key);
-    if (existing && existing.seal === seal) continue;
-    toSeal.set(key, seal);
-  }
-  const added = [...toSeal.keys()].filter((k) => !ledger.entries.some((e) => e.key === k)).length;
-  const changed = toSeal.size - added;
+    const toSeal = new Map<string, string>();
+    for (const rel of files) {
+        const key = `${AGENT_NOTE_ARCHIVE}/${rel}`;
+        const seal = diskSeals.get(key)!;
+        const existing = ledger.entries.find((e) => e.key === key);
+        if (existing && existing.seal === seal) continue;
+        toSeal.set(key, seal);
+    }
+    const added = [...toSeal.keys()].filter((k) => !ledger.entries.some((e) => e.key === k)).length;
+    const changed = toSeal.size - added;
 
-  const touched = sealEntries(archivedDir, manifest, toSeal);
-  for (const entry of touched) manifest.files[entry.key] = entry.seal;
+    const touched = sealEntries(archivedDir, manifest, toSeal);
+    for (const entry of touched) manifest.files[entry.key] = entry.seal;
 
-  if (added > 0) console.log(`sealed ${added} new history entr${added === 1 ? "y" : "ies"}`);
-  if (changed > 0) console.log(`re-adopted ${changed} existing entr${changed === 1 ? "y" : "ies"} (history rewritten deliberately)`);
+    if (added > 0) console.log(`sealed ${added} new history entr${added === 1 ? "y" : "ies"}`);
+    if (changed > 0) console.log(`re-adopted ${changed} existing entr${changed === 1 ? "y" : "ies"} (history rewritten deliberately)`);
 }
 
 for (const w of warnings) console.warn(`warning: ${w}`);

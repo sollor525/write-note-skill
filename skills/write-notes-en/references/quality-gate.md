@@ -19,7 +19,7 @@
 
 ## Alternatives considered
 
-- [ ] ≥2 real alternatives; do not invent options you never weighed. "Do nothing / reuse" counts as a slot only if you genuinely considered it at the time; it is not a required slot.
+- [ ] Record only alternatives actually considered, with no minimum count. If there was no other viable route, explain the constraints. Never invent options to fill a quota; include doing nothing or reusing the current approach only when actually considered.
 - [ ] For each rejected option, state its strongest case first, then why it was rejected — a rejection that lists only its weak points is a straw man.
 - [ ] The reason for rejection lands on a concrete driving condition, not "it doesn't work in practice".
 
@@ -40,7 +40,7 @@ After the self-check, report like this (one line per gap; if there are no gaps, 
 
 ```markdown
 **Semantic self-check: <filename>**
-✅ Solid: motivation stands alone / 2 real alternatives / consequences cover both cost and benefit
+✅ Solid: motivation stands alone / only real alternatives / consequences cover both cost and benefit
 ⚠️ Gaps:
 - Alternatives — a "do it vs. don't" straw man; add a real option parallel to the current plan
 - Consequences — "performance improvement" must land on which path and what magnitude

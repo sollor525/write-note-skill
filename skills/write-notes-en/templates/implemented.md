@@ -19,6 +19,8 @@ Status: implemented
 
 ## Alternatives considered
 
+Keep only alternatives actually considered, with no minimum count; explain the constraints if no other route was viable.
+
 - **<Alternative A>** — <state its strongest case first, then why it was rejected>
 - **<Alternative B>** — <state its strongest case first, then why it was rejected. Write do nothing/reuse only if you genuinely weighed it at the time; do not invent it>
 

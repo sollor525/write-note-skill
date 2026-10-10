@@ -12,21 +12,20 @@ Worse, that bypass was **our own recommended procedure**, written into the docs 
 
 ## Decision
 
-Sealing splits into two files with different jobs:
+Sealing uses two files that must agree entry by entry:
 
-- `archived/manifest.json` — a derived index, `path → sha256`, freely rewritable;
-- `archived/.seal-ledger.json` — the **append-only seal history**, where each entry carries a hash chaining it to the entry before it: `sha256(prevChain + "\n" + key + "\n" + seal)`.
+- `archived/manifest.json` is a derived `path → sha256` index, updated together with the ledger;
+- `archived/.seal-ledger.json` stores entries sorted by path, linked by `sha256(prevChain + "\n" + key + "\n" + seal)`. Inserting a path can recompute subsequent chain values; existing path/seal pairs are the protected facts.
 
-Verification order is fixed: **first** validate the ledger's own integrity via the chain (editing, dropping or reordering any entry breaks it), **then** compare the ledger's values against the content on disk. When the ledger knows a key, the manifest is only a fallback for older repositories — it can never override the ledger.
+Verification checks the chain, manifest key set, files on disk, and content hashes together. Dropping the last entry does not break the preceding chain, so chain validation cannot replace set comparison. Read-only checks never repair the index in memory.
 
-Writing is tightened to match:
+- `--write` only adds seals; it cannot reseal known content or rebuild a single missing metadata file;
+- `--reseal` requires a valid ledger. It can deliberately adopt content changes or recover a missing manifest from a complete ledger, but cannot repair a broken chain;
+- a missing ledger must be restored. Initial migration may establish seals only when both metadata files are absent;
+- existing path/seal pairs at a valid Git baseline must survive. When that baseline already contains a ledger, new archives need an implemented source at that commit, resolved under `AGENT_NOTE_ROOT`;
+- an explicit `AGENT_NOTE_ARCHIVE_BASE_REF` that cannot be resolved or read is an error. Without one, missing Git or an unborn HEAD produces a warning and local checks only.
 
-- `--write` **only adds**; it never re-seals content the history already knows;
-- adopting an edit requires the explicit `--reseal`, which prints every changed entry;
-- when the ledger exists but `manifest.json` is gone, the script refuses to rebuild it implicitly;
-- against a git baseline, a newly added seal must correspond to an `implemented/` note that **existed** at that baseline — a note dropped straight into `archived/` cannot obtain a legitimate seal.
-
-Both files go through `scripts/seal-store.ts`, so the archive CLI and the verifier cannot each implement their own version.
+Both files use `scripts/seal-store.ts` and are updated together. Preflight, recovery, and parser constraints are recorded in [validation and archive consistency](../bug-fix/2026-10-10-validation-and-archive-consistency.md).
 
 ## Alternatives considered
 
@@ -37,10 +36,10 @@ Both files go through `scripts/seal-store.ts`, so the archive CLI and the verifi
 
 ## Consequences
 
-- **Benefit**: tampering, deleting seals, reordering history and hand-placing archived notes all fail the next verification; `--reseal` turns "I know I am rewriting frozen ground" into an explicit act that belongs in the commit message. Covered by tests: `--write` refuses to rebuild after the manifest is deleted, dropping a ledger entry reports a broken chain, rewriting an earlier seal in place reports a broken chain, and re-sealing tampered content is caught against the baseline.
-- **Cost and known limit**: the ledger and the manifest both live inside the same repository, so anyone with write access can rewrite them together. **A local seal leaves evidence; it does not prevent tampering.** Real proof comes from an external witness — a CI baseline pointed at the pre-change commit. That limit is written into `references/archiving.md`, the README and both `SKILL.md` files, and the scripts print an explicit warning when the git witness is unavailable instead of passing silently.
+- **Benefit**: a missing index entry, truncated ledger tail, missing snapshot, or changed content fails verification. A valid Git baseline also detects local seals rewritten together.
+- **Cost and limit**: the index and ledger remain in the same writable repository. Local consistency cannot prove that history was not jointly rewritten. CI needs a trusted pre-change commit; seals produced by `--reseal` remain subject to the subsequent baseline check.
 
 ## Verification
 
-- The seal cases in `npm run test-gates` cover: establishing a baseline, detecting tampering, `--write` refusing to re-seal, refusing to rebuild a lost manifest, `--reseal` adopting deliberately, a dropped ledger entry, an edited ledger seal, and three attack shapes against a git baseline.
-- Chain integrity lives in one place, `verifyChain()`, shared by `seal-store.ts` between the archive CLI and the verifier, so the two cannot drift.
+- `npm run test-gates` covers initial seals, missing metadata, a deleted tail or snapshot, broken chains, deliberate resealing, invalid Git refs, custom note roots, and isolated history-tampering fixtures.
+- `verifyChain()` checks chain integrity and `sealIndexErrors()` checks manifest/ledger agreement. The archiver and verifier share both implementations.

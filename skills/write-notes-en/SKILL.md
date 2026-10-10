@@ -1,6 +1,6 @@
 ---
 name: write-notes-en
-description: Use when a change is non-trivial (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates; skips purely mechanical edits (CRUD, styling, patches, tagging, formatting). English edition.
+description: Use when a change is non-trivial (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates. Mechanical edits need no new note, but affected existing facts stay synchronized. English edition.
 ---
 
 # Write Notes (English edition)
@@ -11,7 +11,7 @@ description: Use when a change is non-trivial (behavior, architecture, cross-fil
 
 Models have a completionist streak and reach for a note far too readily. Pass this gate first.
 
-**Quick return — the following are "purely mechanical or local" changes. Do not write a note. Just change the code:**
+**Choose among three actions: no new note, update an existing note, or create a note. The following mechanical or local changes need no new note. Still update affected paths, symbols, or parameters in existing notes; when no note covers them, change the code directly:**
 
 - Pure reformatting, typo fixes, unambiguous renames
 - Style-only changes (no behavior change)
@@ -127,13 +127,13 @@ Judgment and operating procedure:
 - **After building (proposed → implemented)**, in the same change: ① move it to `implemented/<class>/`, keeping the filename date; ② `Status: proposed` → `Status: implemented`; ③ `## Proposal` → present-tense `## Decision`; ④ fold `## Acceptance criteria` / `## Risks` into `## Consequences` (or a present-tense `## Testing`); ⑤ delete the planning sections. Land it together with the code — **with git, that means the same commit/PR**.
 - **A new decision partially supersedes this one** → keep both, cross-link them both ways, and update only the facts that still hold. Archiving is forbidden here.
 - **A new decision fully supersedes it** → the new note takes over and absorbs every unique piece of reasoning, alternative, consequence and verification gap; once inbound links are fixed, delete the old note if you can, and only run `archive-agent-note.ts` if it still carries independent leverage. The pointer goes in the new note, never in the archived one.
-- **Exempt cases**: the hard gate at the top — anything in the quick-return list is committed as code and nothing else.
+- **No-new-note cases**: use the opening checklist; update affected facts in existing notes alongside the code.
 
 **Interaction protocol (when you need to ask the user):**
 
 1. **Separate facts from decisions first.** Facts available in the environment (code, the note tree, ripgrep) are yours to find; only genuine calls on the merits cost the user time.
 2. **Ask everything in one round.** List every open question with a number, one per line, each with a recommended answer `➡️ <recommendation>`; the user answers in bulk by number ("1 yes, 2 the second option"). Do not drip-feed questions or feel your way along.
-3. **Converge with a confirmation gate, not a question limit.** Before writing or building, restate every decision and get the user's agreement; anything they defaulted on silently, they correct at that point. No confirmation, no action.
+3. **Confirm only unresolved material choices.** When scope, compatibility, or significant risk needs a decision the user has not authorized, complete independent investigation and a reviewable draft first, then ask about the remaining choices together. Proceed with explicit choices and already authorized work without requesting confirmation again; record those choices in the note.
 4. **More than five open decisions is a signal, not a quota.** It means the change is too large — split it into several notes, or submit a `proposed` draft for review. Do not force it into one conversation.
 
 > Judgment details are in `references/when-to-write.md`; archiving and deletion in `references/archiving.md`.

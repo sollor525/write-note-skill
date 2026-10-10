@@ -1,203 +1,110 @@
-/**
- * Archive one implemented Agent Note: stamp `Archived:`, move it into
- * archived/<class>/, seal it, and report who still links to it.
- *
- * Usage:
- *   npx tsx <skill-dir>/scripts/archive-agent-note.ts <note> [options]
- *
- * Options:
- *   --superseded-by <note>  link the archived snapshot from the successor note
- *                           (the link goes in the NEW note, never in the frozen one)
- *   --strict                exit non-zero if any active note still links to the
- *                           archived note, so callers cannot skip the inbound fix
- *
- * Line endings are preserved: a CRLF note stays CRLF, including the inserted
- * `Archived:` line and any link written into a successor note.
- */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+/** 归档 implemented 笔记；先检查输入，再一起写入快照、封印和可选的后继链接。 */
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { AGENT_NOTE_CLASSES, agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
-import { statusIndexOf } from "./note-sections.ts";
-import { sealFile, sealOne } from "./seal-store.ts";
+import { NOTE_PARSER, statusGrammarFor } from "./note-sections.ts";
+import { prepareNewSeal, sha256 } from "./seal-store.ts";
+import { commitFileUpdates } from "./file-updates.ts";
 
-const args = process.argv.slice(2);
-const isStrict = args.includes("--strict");
-const positional = args.filter((a) => !a.startsWith("--"));
-const targetArg = positional[0];
-const supersededByArgIdx = args.indexOf("--superseded-by");
-const supersededByArg = supersededByArgIdx !== -1 ? args[supersededByArgIdx + 1] : undefined;
-
-const USAGE = `Usage: npx tsx <skill-dir>/scripts/archive-agent-note.ts <path-to-note> [--superseded-by <new-note-path>] [--strict]`;
-
-if (supersededByArgIdx !== -1 && (!supersededByArg || supersededByArg.startsWith("--"))) {
-  console.error("Error: --superseded-by requires a note path");
-  process.exit(1);
-}
-if (!targetArg) {
-  console.error(USAGE);
-  process.exit(1);
-}
-
-/** Dominant line ending of a file, so rewriting never mixes CRLF and LF. */
+/** 判断主导换行符；新增行沿用现有风格，原始归档正文不重写。 */
 const eolOf = (text: string) => ((text.match(/\r\n/g)?.length ?? 0) > (text.match(/(?<!\r)\n/g)?.length ?? 0) ? "\r\n" : "\n");
 
-let successorPath: string | undefined;
-if (supersededByArg) {
-  successorPath = resolve(process.cwd(), supersededByArg);
-  if (!existsSync(successorPath)) {
-    console.error(`Error: --superseded-by target not found at ${successorPath}`);
-    process.exit(1);
-  }
+/** 判断相对链接是否指向目标；代码示例由共享解析器排除。 */
+function linksTo(raw: string, fromPath: string, targetPath: string): boolean {
+    return NOTE_PARSER.links(raw).some((target: string) => {
+        if (/^(?:https?:|mailto:|#)/.test(target)) return false;
+        const file = target.split("#")[0];
+        return Boolean(file) && resolve(dirname(fromPath), file) === targetPath;
+    });
 }
-
-const targetPath = resolve(process.cwd(), targetArg);
-if (!existsSync(targetPath)) {
-  console.error(`Error: target note not found at ${targetPath}`);
-  process.exit(1);
-}
-
-const relToRoot = relative(agentNoteRoot, targetPath).replace(/\\/g, "/");
-const segs = relToRoot.split("/");
-
-if (segs[0] !== "implemented" || segs.length !== 3) {
-  console.error(`Error: only notes in .agents/notes/implemented/<class>/ can be archived (got: ${relToRoot})`);
-  process.exit(1);
-}
-
-const cls = segs[1]!;
-const filename = segs[2]!;
-if (!(AGENT_NOTE_CLASSES as readonly string[]).includes(cls)) {
-  console.error(`Error: unknown class "${cls}" (allowed: ${AGENT_NOTE_CLASSES.join(", ")})`);
-  process.exit(1);
-}
-
-// 1. Read the note and normalize line endings for inspection only.
-const raw = readFileSync(targetPath, "utf8");
-const eol = eolOf(raw);
-const lines = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
-
-// Match the status line with the same grammar the format gate accepts, so a
-// note the gate calls implemented can always be archived. The literal
-// `Status: implemented` test rejected the Chinese form (`Status: 已实现`) that
-// the gate accepts.
-const statusIdx = statusIndexOf(lines, "implemented");
-if (statusIdx === -1) {
-  console.error("Error: note must carry an implemented status line the format gate accepts (e.g. `Status: implemented`)");
-  console.error("       run the format gate on this note to see what it expects.");
-  process.exit(1);
-}
-
-// Local calendar date, not UTC — toISOString() would roll the archived stamp
-// back one day for evening runs east of the prime meridian.
-const nowLocal = new Date();
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const today = `${nowLocal.getFullYear()}-${pad2(nowLocal.getMonth() + 1)}-${pad2(nowLocal.getDate())}`;
-// Contract: `Archived:` sits immediately below `Status:` (L3/L4).
-if (!lines.some((l) => l.startsWith("Archived:"))) {
-  lines.splice(statusIdx + 1, 0, `Archived: ${today}`);
-}
-
-let successorRel: string | undefined;
-if (successorPath) {
-  successorRel = relative(agentNoteRoot, successorPath).replace(/\\/g, "/");
-  const successorSegs = successorRel.split("/");
-  if (successorSegs.length !== 3 || !["proposed", "implemented", "rejected"].includes(successorSegs[0] ?? "")) {
-    console.error(`Error: --superseded-by target must be an active note in {lifecycle}/{class}/ (got: ${successorRel})`);
-    process.exit(1);
-  }
-}
-
-const oldTitle = (lines[0] ?? "").replace(/^# Agent Note[:：] ?/, "").trim() || basename(filename, ".md");
 
 /**
- * The cross-link label follows the archived note's own language, not the
- * tool's. A blanket Chinese label used to be written into English notes, which
- * no document mentioned. Punctuation follows the language too.
+ * 校验参数与现有状态，准备全部内容后批量提交；失败抛出带原因的错误。
+ * --strict 在存在入站链接时不写文件；普通 I/O 失败由批量更新函数恢复。
  */
-const linkLabel = /[\u4e00-\u9fff]/.test(oldTitle) ? "历史快照：" : "Historical snapshot: ";
-
-// 2. Destination, refusing to clobber an existing archived note.
-const archivedDir = join(agentNoteRoot, "archived", cls);
-mkdirSync(archivedDir, { recursive: true });
-const archivedPath = join(archivedDir, filename);
-
-if (existsSync(archivedPath)) {
-  console.error(`Error: target archived note already exists at ${archivedPath}`);
-  console.error("Refusing to overwrite existing archived note. Please inspect and resolve name collision manually.");
-  process.exit(1);
-}
-
-writeFileSync(targetPath, lines.join(eol), "utf8");
-renameSync(targetPath, archivedPath);
-console.log(`Moved: ${relToRoot} -> archived/${cls}/${filename}`);
-
-// 3. Seal it through the shared store, so manifest and append-only ledger can
-// never disagree about what was frozen.
-const key = `archived/${cls}/${filename}`;
-const entry = sealOne(join(agentNoteRoot, "archived"), key, sealFile(agentNoteRoot, key));
-console.log(`Sealed ${key} with ${entry.seal.slice(0, 16)}… (history entry ${entry.chain.slice(0, 16)}…)`);
-
-// 4. Inbound links, resolved as real markdown links relative to each note.
-const { notes } = walkAgentNoteTree();
-const inboundFound: string[] = [];
-const LINK_REGEX = /\[([^\]]+)\]\(([^)]+)\)/g;
-for (const note of notes) {
-  const noteFullPath = resolve(agentNoteRoot, note.rel);
-  const content = readFileSync(noteFullPath, "utf8");
-  let match: RegExpExecArray | null;
-  LINK_REGEX.lastIndex = 0;
-  while ((match = LINK_REGEX.exec(content)) !== null) {
-    const rawTarget = match[2]?.trim();
-    if (!rawTarget || rawTarget.startsWith("http://") || rawTarget.startsWith("https://") || rawTarget.startsWith("#") || rawTarget.startsWith("mailto:")) continue;
-    const fileTarget = rawTarget.split("#")[0];
-    if (!fileTarget) continue;
-    const resolvedTarget = resolve(dirname(noteFullPath), fileTarget);
-    if (resolvedTarget === targetPath) {
-      inboundFound.push(note.rel);
-      break;
+function main(): void {
+    const args = process.argv.slice(2);
+    let targetArg: string | undefined;
+    let successorArg: string | undefined;
+    let strict = false;
+    for (let index = 0; index < args.length; index++) {
+        const arg = args[index]!;
+        if (arg === "--strict") strict = true;
+        else if (arg === "--superseded-by") {
+            successorArg = args[++index];
+            if (!successorArg || successorArg.startsWith("--")) throw new Error("--superseded-by requires a note path");
+        } else if (arg.startsWith("--") || targetArg) throw new Error(`Unexpected argument: ${arg}`);
+        else targetArg = arg;
     }
-  }
-}
+    if (!targetArg) throw new Error("Usage: archive-agent-note.ts <path> [--superseded-by <new-note>] [--strict]");
 
-if (inboundFound.length > 0) {
-  console.log("\n[Notice] The following active notes link to the archived note:");
-  for (const rel of inboundFound) console.log(`  - ${rel}`);
-  console.log("Fix these relative links now: verify-agent-note-tree reports them as dangling until you do.");
-  if (isStrict) {
-    console.error(`\nError: --strict — ${inboundFound.length} inbound link(s) still point at the archived note; nothing is committed until they are updated.`);
-    process.exit(1);
-  }
-} else {
-  console.log("\nNo active notes link to this archived note.");
-}
-
-// 5. Optional cross-link, written into the successor note only.
-if (successorPath) {
-  const relLink = relative(dirname(successorPath), archivedPath).replace(/\\/g, "/");
-  const successorRaw = readFileSync(successorPath, "utf8");
-  const successorEol = eolOf(successorRaw);
-  const alreadyLinked = [...successorRaw.matchAll(LINK_REGEX)]
-    .map((m) => m[2]?.split("#")[0]?.trim())
-    .filter((t): t is string => Boolean(t))
-    .some((t) => resolve(dirname(successorPath), t) === archivedPath);
-
-  if (alreadyLinked) {
-    console.log(`Already linked from ${successorRel}; left unchanged.`);
-  } else {
-    const successorLines = successorRaw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
-    // Land the link before the final H2 so the note keeps its section order
-    // (appending at EOF would strand it after ## Consequences).
-    let lastH2 = -1;
-    for (let i = 0; i < successorLines.length; i++) {
-      if (successorLines[i]!.startsWith("## ")) lastH2 = i;
+    const targetPath = resolve(targetArg);
+    const rel = relative(agentNoteRoot, targetPath).replace(/\\/g, "/");
+    const parts = rel.split("/");
+    if (parts.length !== 3 || parts[0] !== "implemented" || !(AGENT_NOTE_CLASSES as readonly string[]).includes(parts[1]!)) {
+        throw new Error(`Only implemented/<class>/ notes can be archived (got: ${rel})`);
     }
-    const anchor = lastH2 > 0 ? lastH2 : successorLines.length;
-    let insertAt = anchor;
-    while (insertAt > 0 && successorLines[insertAt - 1]!.trim() === "") insertAt--;
-    successorLines.splice(insertAt, 0, "", `[${linkLabel}${oldTitle}](${relLink})`);
+    const filename = parts[2]!;
+    if (!/^\d{4}-\d{2}-\d{2}-.+\.md$/.test(filename)) throw new Error(`Invalid note filename: ${filename}`);
+    const raw = readFileSync(targetPath, "utf8");
+    const { lines } = NOTE_PARSER.mask(raw);
+    if (!/^# Agent Note[:：] ?\S/.test(lines[0] ?? "") || lines[1] !== "" || !statusGrammarFor("implemented")!.test(lines[2] ?? "") || lines[3] !== "") {
+        throw new Error("Source note must have a valid implemented header; run verify-agent-note-format before archiving");
+    }
 
-    while (successorLines.length > 0 && successorLines[successorLines.length - 1]!.trim() === "") successorLines.pop();
-    writeFileSync(successorPath, `${successorLines.join(successorEol)}${successorEol}`, "utf8");
-    console.log(`Linked from ${successorRel}: [${linkLabel}${oldTitle}](${relLink})`);
-  }
+    const archiveDir = join(agentNoteRoot, "archived");
+    const key = `archived/${parts[1]}/${filename}`;
+    const archivedPath = join(agentNoteRoot, key);
+    if (existsSync(archivedPath)) throw new Error(`Refusing to overwrite existing archived note: ${archivedPath}`);
+
+    // 只在固定头部位置插入一行，正文中的 Archived 示例不会影响标记。
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const headLength = /^(?:[^\r\n]*(?:\r\n|\n|\r)){3}/.exec(raw)![0].length;
+    const archived = `${raw.slice(0, headLength)}Archived: ${today}${eolOf(raw)}${raw.slice(headLength)}`;
+    const updates = new Map<string, string | Buffer | null>([[archivedPath, archived]]);
+    for (const entry of prepareNewSeal(archiveDir, key, `sha256:${sha256(archived)}`)) updates.set(...entry);
+
+    if (successorArg) {
+        const successorPath = resolve(successorArg);
+        const successorRel = relative(agentNoteRoot, successorPath).replace(/\\/g, "/");
+        const successorParts = successorRel.split("/");
+        if (successorPath === targetPath || successorParts.length !== 3 || !["proposed", "implemented", "rejected"].includes(successorParts[0]!) || !(AGENT_NOTE_CLASSES as readonly string[]).includes(successorParts[1]!)) {
+            throw new Error(`--superseded-by requires a different active note (got: ${successorRel})`);
+        }
+        const successor = readFileSync(successorPath, "utf8");
+        if (!linksTo(successor, successorPath, archivedPath)) {
+            const oldTitle = lines[0].replace(/^# Agent Note[:：] ?/, "").trim() || basename(filename, ".md");
+            const label = /[\u4e00-\u9fff]/.test(oldTitle) ? "历史快照：" : "Historical snapshot: ";
+            const link = relative(dirname(successorPath), archivedPath).replace(/\\/g, "/");
+            const successorLines = successor.split(/\r\n|\r|\n/);
+            const sections = NOTE_PARSER.sections(successor);
+            let insertAt = sections.at(-1)?.start ?? successorLines.length;
+            while (insertAt > 0 && successorLines[insertAt - 1]!.trim() === "") insertAt--;
+            successorLines.splice(insertAt, 0, "", `[${label}${oldTitle}](${link})`);
+            updates.set(successorPath, successorLines.join(eolOf(successor)));
+        }
+    }
+
+    const inbound: string[] = [];
+    for (const note of walkAgentNoteTree().notes) {
+        const path = resolve(agentNoteRoot, note.rel);
+        if (path !== targetPath && linksTo(readFileSync(path, "utf8"), path, targetPath)) inbound.push(note.rel);
+    }
+    if (strict && inbound.length) throw new Error(`--strict: inbound links remain; no files changed:\n${inbound.join("\n")}`);
+
+    // 源文件最后删除；快照、两份封印和后继笔记任何一步失败都恢复原字节。
+    updates.set(targetPath, null);
+    commitFileUpdates(updates);
+    console.log(`Moved: ${rel} -> ${key}`);
+    console.log(`Sealed: ${key}`);
+    if (inbound.length) console.log(`Update inbound links now:\n${inbound.join("\n")}`);
+    else console.log("No active notes link to this archived note.");
+}
+
+try {
+    main();
+} catch (error) {
+    console.error("Archive failed:", error);
+    process.exitCode = 1;
 }

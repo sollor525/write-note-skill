@@ -20,6 +20,8 @@ Status: proposed
 
 ## Alternatives considered
 
+Keep only alternatives actually considered, with no minimum count; explain the constraints if no other route was viable.
+
 Required. Write only the options you genuinely weighed at the time (do not invent ones you never had). "Do nothing / reuse what exists" may be one slot, but it is not a required slot.
 
 One candidate per paragraph, or a `### Why not <X>?` subsection:

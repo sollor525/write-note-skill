@@ -22,11 +22,11 @@ The remaining real defects: the archive CLI wrote the Chinese link label `[历�
 
 **Exactly one vocabulary.** Section names and status-line grammars are exported from `scripts/note-sections.ts`, and anything needing them must import them:
 
-- `statusIndexOf(lines, lifecycle)` matches against `STATUS_GRAMMAR`, so the archive CLI no longer compares literals;
-- `build-board.ts` takes its section names from `SECTIONS` and `ALTERNATIVES_NAMES`, and its private list is gone;
-- the section regex keeps only the `(?=^## )` lookahead; the empty-line branch is deleted.
+- the archive CLI uses `statusGrammarFor()` to validate line three of the fixed header, so examples cannot replace the status line;
+- `note-parser.mjs` provides a self-contained parser with aliases supplied by `note-sections.ts`; format and link gates also share its example filtering;
+- `build-board.ts` uses that parser for bundling and embeds it with its vocabulary into browser pages. Real H2 headings delimit complete sections, including multiple paragraphs and code examples.
 
-**The chain's semantics are fixed as: stored order is chain order, sorted by key.** A single write path, `sealEntries()`, merges, sorts by key, recomputes the entire chain, and only then writes. `writeLedgerAndManifest()` asserts that the ledger it is handed is already sorted and throws if not. "Forgot to re-chain" is therefore no longer possible: the invariant is enforced by the function that writes, not by callers remembering.
+**Stored order is chain order, sorted by key.** `seal-store.ts` merges, sorts, and recomputes the chain before `sealFileUpdates()` validates manifest agreement and ordering and prepares complete file contents. The verifier's `sealEntries()` and archiver's `prepareNewSeal()` share this process. `commitFileUpdates()` applies the batch and restores modified files after ordinary I/O failures. See [validation and archive consistency](2026-10-10-validation-and-archive-consistency.md) for its limits.
 
 **Everything else is a minimal fix.** The cross-note link label follows **the archived note's own language**, punctuation included (a halfwidth colon in English). `check-note-anchors` drops the overridden `.agents` carve-out in favour of a comment explaining that notes are not code, and gains `AGENT_NOTE_CODE_ROOTS` (multiple roots, split on the platform delimiter) so the scan range can be stated explicitly. The dead `ROOT_ALLOWLIST` exemption is deleted. Both `SKILL.md` editions list the missing alias. Both `note-format.md` editions state accurately that the gate accepts Chinese status lines and that this edition simply does not use them.
 
@@ -42,11 +42,11 @@ The remaining real defects: the archive CLI wrote the Chinese link label `[历�
 
 ## Consequences
 
-- **Benefit**: the gate, the archiver and the board finally agree on what a valid note is; out-of-order archiving no longer wounds the history; multi-paragraph sections render completely. The regression suite grew from 50 to 65 cases, each new one corresponding to a real defect above (out-of-order archiving, the first `--write` in a repository with no `archived/`, archiving a Chinese-status note, multi-paragraph extraction, alias parity, and four baseline-comparison behaviours: append passes, re-seal caught, removal caught, hand-dropped caught).
-- **Cost and known limits**: `note-sections.ts` becomes a hard dependency of several entry points — the deliberate price of centralising. `sealEntries()` recomputes the whole chain per write (O(n)); negligible at thousands of notes. The real limit is that chain order is decided by `localeCompare` over keys, so **any change to the sort rule changes the historical chain** — that is a breaking change which must go through `--reseal`, and the baseline comparison catches it. Also note this fix **changes the meaning of existing seal histories**: a ledger produced by out-of-order archiving before this change will report `chain broken` and needs one `--reseal` to adopt. That upgrade note is not yet in the README.
+- **Benefit**: format gates, the archiver, and both board modes share vocabulary and parsing rules. Out-of-order archives retain a valid chain and sections retain all paragraphs.
+- **Cost and limit**: parser and vocabulary modules are shared dependencies that installations must deliver together. Seal writes sort by path and recompute the chain. Changing the sort rule is a storage-format decision; `--reseal` cannot repair a broken older chain. Corrupt history needs trusted backups or separate verification; no automatic migration command is provided.
 
 ## Verification
 
-- `npm run test-gates` 65/65, including: the chain survives out-of-order archiving; the ledger is stored in sorted key order; the first `--write` on a repository with no `archived/` succeeds and creates both files; a note the format gate accepts with a Chinese status line can also be archived; the board keeps multi-paragraph sections; the board reads an alias the gate accepts; and the four baseline-comparison behaviours.
-- Shared scripts are byte-compared across editions by `npm run sync-editions`, with independent assertions in `scripts/test-gates.mjs`.
-- Not verified: the upgrade path (an old out-of-order ledger plus `--reseal`) was exercised only on synthetic fixtures, never on a real historical repository.
+- `npm run test-gates` covers out-of-order insertion, initial writes, Chinese status lines, multiple paragraphs, aliases, example filtering, parity between embedded browser parsing and bundling, and legitimate versus invalid changes against a Git baseline.
+- `scripts/sync-editions.mjs` and the regression suite byte-compare shared files. `npm run test-skill-install` exercises the delivered entry points and resources.
+- Parser parity executes actual generated-page code in a Node VM. It does not replace browser interaction tests, and manual migration of a corrupt historical repository has not been exercised.

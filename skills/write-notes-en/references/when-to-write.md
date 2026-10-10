@@ -22,7 +22,7 @@ A note is never rewritten into a different decision: facts (paths, symbols, defa
 | **A new decision partially supersedes the plan** | **Keep both notes and cross-link them** | Update only the facts that still hold. Do not archive |
 | **The plan is rejected in review** | **Move it to `rejected/` or delete it** | Keep it, with the reason written out, only when that reason can stop a future repeat; otherwise delete it outright |
 | **A new architecture completely replaces the old one** | **Absorb first, delete if you can, otherwise archive** | See §4. Write the pointer in the new note, not in the archived one |
-| **Version tagging, a minor dependency patch, formatting** | **Exempt (Not Applicable)** | Commit the code directly; no note needed |
+| **Version tagging, a minor dependency patch, formatting** | **No new note required** | Do not create a note; still update affected facts in existing notes |
 
 ---
 
@@ -65,7 +65,7 @@ The gate catches this through the skeleton change: a leftover `## Proposal` in a
    - **Archive**: the old note still has independent leverage (a negative guarantee, an ownership boundary, a re-introduction condition) → `archive-agent-note.ts`. Insert only the single `Archived:` line; write the cross-link in the new note.
 4. **Fix inbound links**: repoint relative links that still target the old path to the new note (point at `archived/` only when citing a historical snapshot).
 
-`--superseded-by` only verifies that the new note exists and appends a relative link to the archived path at the end of the new note.
+`--superseded-by` requires a different active note and inserts a relative archive link before its last section. An equivalent link already present is not duplicated.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: write-notes
-description: Use when a change is non-trivial (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates; skips purely mechanical edits (CRUD, styling, patches, tagging, formatting).
+description: Use when a change is non-trivial (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates. Mechanical edits need no new note, but affected existing facts stay synchronized.
 ---
 
 # Write Notes
@@ -11,7 +11,7 @@ description: Use when a change is non-trivial (behavior, architecture, cross-fil
 
 模型有迎合强迫症，动不动就想立 Note。先过这道闸：
 
-**快速返回——以下属于"纯机械或局部改动"，严禁立 Note，直接改代码：**
+**先分清三种动作：不新建、同步已有笔记、新建笔记。以下纯机械或局部改动不新建 Note；已有笔记提及受影响的路径、符号或参数时，仍要同步事实。没有对应记录时直接改代码：**
 
 - 纯排版格式化、错别字、无歧义重命名
 - 样式调整（不改行为）
@@ -127,13 +127,13 @@ Status: <状态>
 - **施工完（proposed → implemented）**，同一次改动里做完：① 移到 `implemented/<class>/`，文件名日期不动；② `Status: proposed` → `Status: implemented`；③ `## Proposal` → 现在时 `## Decision`；④ `## Acceptance criteria` / `## Risks` 折进 `## Consequences`（或现在时 `## Testing`）；⑤ 删计划段。与代码同批落盘——**git 场景即同一 commit/PR**。
 - **方案被新决策部分取代** → 两篇都留，双方加相对链接；只更新仍成立的事实。禁止归档。
 - **方案被新决策完全取代** → 新 Note 接管并写入旧篇全部独特理由/备选/后果/验证缺口；入站链接改完后，能删则删，不能删（旧篇仍有独立杠杆）再 `archive-agent-note.ts`。指针写在新笔记里，不写进归档篇。
-- **免写场景**：见文首红线——快速返回清单里的，直接提交代码。
+- **免新建场景**：见文首清单；不新建笔记，但已有笔记中的事实仍与代码同步。
 
 **交互协议（向用户提问时）：**
 
 1. **先分 facts 和 decisions**：环境里查得到的事实（代码、笔记树、rg）自己查完再问；只有真正要拍板的取舍才占用用户时间。
 2. **一轮全抛**：所有待拍板的问题编号列出，每题独立一行给推荐答案 `➡️ <推荐>`；用户按编号批量应答（"1 yes，2 第二个选项"），不挤牙膏、不来回试探。
-3. **收敛靠确认门，不靠题数上限**：落笔/动手前复述全部决定，用户确认达成共识后再执行——复述中被默认掉的任何一点，用户在确认时纠偏；没确认不动手。
+3. **只确认尚未解决的重要取舍**：涉及未授权的范围、兼容性或明显风险时，先完成可独立推进的调查和草稿，再集中确认剩余决定。用户已经明确的选择和已授权工作直接执行，不重复索取确认；笔记记录这些选择。
 4. **开放决策超过五个是信号，不是配额**：说明这次改动太大——拆成多篇笔记，或先交 proposed 草稿走评审，别在一次对话里硬塞。
 
 > 判定细则见 `references/when-to-write.md`，归档与删除见 `references/archiving.md`。

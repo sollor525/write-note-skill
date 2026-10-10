@@ -68,6 +68,8 @@ When judging, calibrate against the **structure of the rationale** in these exam
 
 Use the CLI directly (physical move + seal + inbound dead-link report in one shot, **with no dependency on git**):
 
+Before writing, the CLI validates the source header, successor path, both seal files, and already-sealed snapshots. With `--strict`, inbound links cause failure without modifying files. It prepares all content before applying changes and restores modified files after ordinary I/O failures. Run archive writers serially; termination or power loss is not atomic across files, so verify and restore inconsistent state from Git before retrying. An `Archived:` example in the body never replaces the header marker.
+
 ```bash
 npx tsx .agents/skills/write-notes-en/scripts/archive-agent-note.ts \
   .agents/notes/implemented/<class>/<filename>.md \
@@ -75,7 +77,7 @@ npx tsx .agents/skills/write-notes-en/scripts/archive-agent-note.ts \
   [--strict]
 ```
 
-The CLI does the following, in order:
+After preflight and preparation, the CLI commits the following results:
 
 1. **Write the header marker**: insert `Archived: YYYY-MM-DD` **immediately adjacent to** `Status: implemented` (no blank line between L3 and L4 — this is a hard contract, and the seal verifier checks it line by line):
    ```markdown
@@ -87,11 +89,11 @@ The CLI does the following, in order:
    ## Problem
    ...
    ```
-2. **Move the file**: `implemented/<class>/...` → `archived/<class>/...` (in a git workflow, prefer `git mv` to preserve history; the CLI implements it as a plain file move, which works just as well without git). The file's line-ending style is preserved verbatim — a CRLF note is still CRLF after archiving and never picks up bare LF.
+2. **Move the note**: write the `archived/<class>/...` snapshot, then remove the `implemented/<class>/...` source after the other related writes succeed. The file's line-ending style is preserved verbatim — a CRLF note is still CRLF after archiving and never picks up bare LF.
 3. **Seal**: write two files —
-   - `archived/manifest.json`: a derived `path → sha256` index that may be rewritten;
-   - `archived/.seal-ledger.json`: an **append-only seal history**, where each entry carries a chained hash linking to the previous one. Editing, deleting, or reordering any entry is caught on the spot by `verify-archived`.
-4. **Inbound dead-link report**: scan active notes for Markdown relative links pointing at this note (exact link parsing, not text substring matching) and print the list that needs manual repair. With `--strict`, the CLI exits non-zero as long as any inbound link remains — the caller cannot treat it as "done" and skip it.
+   - `archived/manifest.json`: a derived `path → sha256` index generated together with the ledger and required to match it;
+   - `archived/.seal-ledger.json`: a ledger sorted by path, with each entry linked to the previous one by a hash. New paths can recompute later chain values; existing path/seal pairs are protected by the baseline.
+4. **Inbound dead-link report**: scan active notes for Markdown relative links pointing at this note (exact link parsing, not text substring matching) and print the list that needs manual repair. With `--strict`, an inbound link causes a non-zero exit before any file is modified.
 5. **Optional `--superseded-by`**: verify that the new note exists and append a relative link to the archived path in the **new note**. The link is inserted before the last section, so it never lands after `## Consequences`; an equivalent link that already exists is not inserted twice. The archived note is not touched.
 
 Apart from the single `Archived:` header line, **no other character of an archived note's body may be changed**.
@@ -100,7 +102,7 @@ Apart from the single `Archived:` header line, **no other character of an archiv
 
 Stating this plainly matters more than adding one more check:
 
-- **It can**: silent edits, deleting a seal, reordering history, dropping a note straight into `archived/` by hand — all of these turn red at the next `verify-archived`.
+- **It can**: detect disagreements between snapshots, the manifest, and the ledger. A Git baseline containing seal history also detects rewritten seals or new archives without an original implemented note. A chain alone cannot detect a deleted tail entry; the manifest and files must also be checked.
 - **It cannot**: `manifest.json` and the seal history both live in the same repo, so anyone with write access can rewrite them together. **A local seal is tamper-evident, not tamper-proof.** The only real witness is an external baseline: set `AGENT_NOTE_ARCHIVE_BASE_REF` in CI to the pre-change commit, and the append-only rule is then backed by a commit that the working tree cannot rewrite.
 
 Hence two hard rules:
@@ -112,10 +114,10 @@ Hence two hard rules:
    npx tsx .agents/skills/write-notes-en/scripts/verify-archived-agent-notes.ts --reseal
    ```
 
-   `--reseal` adopts the current content as the new baseline and prints every entry it changed. It is the declaration "I know I am rewriting the frozen zone," and the commit message should explain why; unless the file is deleted or `--reseal` is used, an edited archived note does **not** receive a new seal.
+   `--reseal` adopts the current content as the new baseline and prints every entry it changed. The commit message should explain this deliberate rewrite. It requires a valid ledger, cannot repair a broken chain, and cannot make rewritten seals pass comparison against the old baseline.
 
 > Backfilling legacy content: if `archived/` already holds notes but has no seal files yet (for example, after migrating from an existing corpus), run
-> `npx tsx .agents/skills/write-notes-en/scripts/verify-archived-agent-notes.ts --write` to establish a baseline — it does so only while the directory has no seal history at all; once a seal history exists, a missing `manifest.json` must be restored from git, or explicitly re-adopted with `--reseal`.
+> `npx tsx .agents/skills/write-notes-en/scripts/verify-archived-agent-notes.ts --write` to establish a baseline — it does so only while the directory has no seal history at all; once a seal history exists, a missing `manifest.json` must be restored from Git or recovered from a complete ledger using `--reseal`. A missing ledger must be restored; the command will not rebuild it.
 
 ---
 
@@ -124,7 +126,7 @@ Hence two hard rules:
 Once a note is in `archived/`:
 - **Permanently read-only**: never edit, translate, reflow, update, move, or delete it.
 - **Mechanically enforced**: `verify-archived` checks the header layout, the closed set of classes under `archived/<class>/`, agreement between on-disk content and the seal history, the chain integrity of that history, and an append-only comparison against the baseline ref (`AGENT_NOTE_ARCHIVE_BASE_REF`, default HEAD). A changed or deleted sealed entry is an error.
-- **Degraded mode must be loud**: when git is absent, or git cannot run, the script prints an explicit degradation warning ("external witness missing") instead of passing quietly. A missing witness makes an edited and resealed note look perfectly normal.
+- **Degraded mode must be loud**: without an explicit baseline, when git is absent or cannot run, the script prints an explicit degradation warning ("external witness missing") instead of passing quietly. A missing witness makes an edited and resealed note look perfectly normal.
 - **Exempt from daily scans**: `verify-agent-note-tree` and `verify-agent-note-format` skip the `archived/` directory by default, so a broken outbound link in an archived file never blocks a daily build.
 - **Never the basis for current behavior**: in a code conflict or architecture review, `implemented/` is authoritative and `archived/` serves only as historical evidence; supersession is settled by the cross-links in the new notes and by the inbound rewrites.
 

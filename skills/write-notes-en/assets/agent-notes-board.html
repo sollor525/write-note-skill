@@ -902,77 +902,9 @@ function parseMarkdown(text) {
   }).join('');
 }
 
-function parseNote(raw, relPath, slugToId = new Map()) {
-  const slug = relPath.split('/').pop().replace(/\.md$/, '');
-  const parts = relPath.split('/');
-  const lifecycle = parts[0];
-  const cls = parts[1] || 'architecture';
-
-  let title = slug;
-  let status = lifecycle;
-  let date = '';
-
-  const dMatch = /^(\d{4}-\d{2}-\d{2})/.exec(slug);
-  if (dMatch) date = dMatch[1];
-
-  const h1Match = /^# Agent Note[^:：]*[:：]\s*(.*)$/m.exec(raw);
-  if (h1Match) title = h1Match[1].trim();
-
-  function extractSection(pattern) {
-    const re = new RegExp(`^## (?:${pattern})\\s*\\n+([\\s\\S]*?)(?=^## |\\s*$)`, 'm');
-    const m = re.exec(raw);
-    return m ? m[1].trim() : '';
-  }
-
-  const problem = extractSection('Problem|问题');
-  const decision = extractSection('Decision|Proposal|决策|提案');
-  const alternatives = extractSection('Alternatives considered|曾考虑的替代方案|曾考虑的备选');
-  const consequences = extractSection('Consequences|后果');
-
-  const links = [];
-  for (const m of raw.matchAll(/\]\(([^)]+\.md)\)/g)) {
-    let targetHref = m[1].split('#')[0].trim();
-    if (targetHref.includes('://')) continue;
-    targetHref = targetHref.replace(/\.zh\.md$/, '.md');
-    const segs = `${lifecycle}/${cls}/${targetHref}`.split('/');
-    const resolved = [];
-    for (const s of segs) {
-      if (!s || s === '.') continue;
-      if (s === '..') resolved.pop();
-      else resolved.push(s);
-    }
-    const cleanTarget = resolved.join('/');
-
-    let finalTarget = '';
-    if (slugToId.has(cleanTarget)) {
-      finalTarget = slugToId.get(cleanTarget);
-    } else {
-      const targetSlug = targetHref.split('/').pop().replace(/\.md$/, '');
-      if (slugToId.has(targetSlug)) {
-        finalTarget = slugToId.get(targetSlug);
-      }
-    }
-    if (finalTarget && finalTarget !== relPath) {
-      links.push(finalTarget);
-    }
-  }
-
-  return {
-    id: relPath,
-    slug,
-    lifecycle,
-    cls,
-    date,
-    title,
-    status,
-    problem,
-    decision,
-    alternatives,
-    consequences,
-    outLinks: [...new Set(links)],
-    rawBody: raw,
-  };
-}
+// 解析器由生成命令内嵌，与打包模式和校验器共用实现。
+/* NOTE_PARSER */
+const parseNote = NOTE_PARSER.parseNote;
 
 async function scanDirectory(rootHandle) {
   const notesMap = new Map();

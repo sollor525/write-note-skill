@@ -68,6 +68,8 @@
 
 推荐直接用 CLI（物理移动 + 封印 + 入站死链报告一次完成，**不依赖 git**）：
 
+归档前先验证源笔记固定头部、后继路径、两份封印及已封印快照；`--strict` 发现入站链接时不修改文件。所有内容准备好后批量写入，普通 I/O 失败会恢复已修改文件并报告原因。命令必须串行执行；进程被终止或断电不具备跨文件原子性，重试前应校验并从 Git 恢复不一致状态。正文中的 `Archived:` 示例不影响头部标记。
+
 ```bash
 npx tsx .agents/skills/write-notes/scripts/archive-agent-note.ts \
   .agents/notes/implemented/<class>/<filename>.md \
@@ -75,7 +77,7 @@ npx tsx .agents/skills/write-notes/scripts/archive-agent-note.ts \
   [--strict]
 ```
 
-CLI 依次完成：
+CLI 在检查和准备完成后提交以下结果：
 
 1. **写头部标记**：`Archived: YYYY-MM-DD` **紧邻** `Status: implemented` 插入（L3/L4 之间不留空行——这是硬契约，封印校验器逐行核对）：
    ```markdown
@@ -87,11 +89,11 @@ CLI 依次完成：
    ## Problem
    ...
    ```
-2. **物理移动**：`implemented/<class>/...` → `archived/<class>/...`（git 场景建议用 `git mv` 保留历史，CLI 用文件移动实现，无 git 同样工作）。文件的行尾风格原样保留——CRLF 笔记归档后仍是 CRLF，不会混入裸 LF。
+2. **移动笔记**：写入 `archived/<class>/...` 快照，完成其他关联写入后删除 `implemented/<class>/...` 源文件。文件的行尾风格原样保留——CRLF 笔记归档后仍是 CRLF，不会混入裸 LF。
 3. **封印**：写入两个文件——
-   - `archived/manifest.json`：`路径 → sha256` 的派生索引，可以重写；
-   - `archived/.seal-ledger.json`：**只增不改的封印史**，每条带一个链接到前一条的链式哈希。改、删或重排任何一条历史都会被 `verify-archived` 当场识别。
-4. **入站死链报告**：扫描活跃笔记里指向该笔记的 Markdown 相对链接（精确链接解析，非文本子串），列出需人工修复的清单。加 `--strict` 时，只要还有入站链接就让 CLI 非零退出——调用方无法把它当成"已完成"跳过。
+   - `archived/manifest.json`：`路径 → sha256` 的派生索引，由命令生成，必须与账本逐项一致；
+   - `archived/.seal-ledger.json`：按路径排序的封印账本，每条带链接前一条的哈希。新增路径会重算后续链值；已有路径与摘要受基线约束。
+4. **入站死链报告**：扫描活跃笔记里指向该笔记的 Markdown 相对链接（精确链接解析，非文本子串），列出需人工修复的清单。加 `--strict` 时，写入前发现入站链接就让 CLI 非零退出且不修改文件——调用方无法把它当成"已完成"跳过。
 5. **可选 `--superseded-by`**：校验新笔记存在，并在**新笔记**里补一条指向归档路径的相对链接。链接插在最后一个小节之前，不会落到 `## Consequences` 之后；已存在等价链接时不重复插入。不改归档篇。
 
 除头部 `Archived:` 一行外，**禁止修改归档正文的任何其他字符**。
@@ -100,7 +102,7 @@ CLI 依次完成：
 
 写清楚这一点，比多加一道校验更重要：
 
-- **能**：静默编辑、删除封印、重排历史、把笔记直接手放进 `archived/`——这些都会在下次 `verify-archived` 时红。
+- **能**：发现快照、索引和账本不一致；结合包含封印历史的 Git 基线，还能发现历史封印被改写或新增归档缺少原始 implemented 笔记。单靠链不能识别尾条被删，必须同时检查索引与文件。
 - **不能**：`manifest.json` 和封印史都在同一个仓库里，有写权限的人可以连它们一起改写。**本地封印是"留痕"（tamper-evident），不是"防篡改"（tamper-proof）**。唯一的见证者是外部基线：在 CI 里设置 `AGENT_NOTE_ARCHIVE_BASE_REF` 为变更前的 commit，此时只增不改的规则由工作区无法改写的提交来背书。
 
 因此有两条硬规矩：
@@ -112,10 +114,10 @@ CLI 依次完成：
    npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts --reseal
    ```
 
-   `--reseal` 会把当前内容采纳为新基线，并把每个被改动的条目打印出来。它是"我知道自己在改写冻结区"的声明，应当在提交信息里说明原因；未删除或用 `--reseal` 时，一个被编辑过的归档笔记**不会**获得新封印。
+   `--reseal` 会把当前内容采纳为新基线，并把每个被改动的条目打印出来。它是显式改写封印的操作，应当在提交信息里说明原因；要求原账本有效，不能修复损坏的链，也不能让改写后的封印通过旧基线检查。
 
 > 历史包袱补齐：若 `archived/` 已有笔记但还没有封印文件（例如从既有语料迁移而来），运行
-> `npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts --write` 建立基线——它只在该目录还没有任何封印史时才会这么做；一旦封印史存在，缺失的 `manifest.json` 必须从 git 恢复，或用 `--reseal` 显式重新采纳。
+> `npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts --write` 建立基线——它只在该目录还没有任何封印史时才会这么做；一旦封印史存在，缺失的 `manifest.json` 必须从 Git 恢复，或用 `--reseal` 从完整账本恢复索引；缺失的账本必须恢复，不会由命令重建。
 
 ---
 
@@ -124,7 +126,7 @@ CLI 依次完成：
 一旦进入 `archived/`：
 - **永久只读**：严禁编辑、翻译、重排版、更新、移动或删除。
 - **机械强制**：`verify-archived` 校验头部布局、`archived/<class>/` 的分类封闭集、磁盘内容与封印史的一致性、封印史的链式完整性，以及与基线 ref 的只增不改对比（`AGENT_NOTE_ARCHIVE_BASE_REF`，默认 HEAD）。已封印条目被改动或删除即报错。
-- **降级要响**：没有 git、或 git 无法执行时，脚本打印明确的降级警告（"外部见证缺失"），而不是安静地当作通过。缺失的见证会让被编辑并重新封印的笔记看起来完全正常。
+- **降级要响**：未显式指定基线且没有 git、或 git 无法执行时，脚本打印明确的降级警告（"外部见证缺失"），而不是安静地当作通过。缺失的见证会让被编辑并重新封印的笔记看起来完全正常。
 - **免除日常扫描**：`verify-agent-note-tree` 和 `verify-agent-note-format` 默认跳过 `archived/` 目录，归档文件的出站链接失效不会阻塞日常构建。
 - **不可作为当前行为依据**：代码冲突或架构评审时，以 `implemented/` 为准，`archived/` 仅作为历史考据参考；取代关系以新笔记互链和入站改写为准。
 
