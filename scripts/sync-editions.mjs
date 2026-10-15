@@ -15,6 +15,7 @@ const SHARED = [
     'scripts/archive-agent-note.ts',
     'scripts/check-note-anchors.ts',
     'scripts/note-sections.ts',
+    'scripts/verify-bilingual-notes.ts',
     'scripts/note-parser.mjs',
     'scripts/seal-store.ts',
     'scripts/file-updates.ts',
