@@ -1,26 +1,34 @@
 # 评审文档：write-notes-en
 
-- 日期：2026-10-15
+- 日期：2026-10-15（评审基线 `7612ae3`；修复批同日落在其后）
 - 评审对象：`skills/write-notes-en/`（英文版技能；共享逻辑与 `skills/write-notes/` 逐字节相同）
 - 评审范围：`SKILL.md`、`references/`（7 篇）、`scripts/`、`templates/`、本仓库自用方式（`.agents/notes/`、`.github/workflows/verify.yml`、`README.md`）
-- 状态：**只评审，未修改任何技能代码或文档**。发现项留待决定后再动。
+- 状态：**7 项发现已全部处置**（见文末「处置结果」）；评审原文保留为证据，未逐句改写
+
+## 复核修正（2026-10-15，修复批）
+
+评审当时的三处数字与机制描述，在修复批复核时修正如下。发现本身全部成立，只是记录已过期：
+
+1. **笔记数量已变。** 评审基线 `7612ae3` 是 9 篇笔记；其后 `1885750` 把评审本身写成一篇文章，现在是 **12 篇**（9 篇原有 + 评审记录 + 修复批新增 2 篇）。原文"9 篇笔记"是当时的快照。
+2. **发现 #1 的复现机制表述不准。** 原文写"同一篇笔记若跑 `verify-agent-note-format` 会被拒绝"，容易被读成"归档后仍会被拒"。实际机制是：格式门禁**只遍历活跃树**，笔记归档后落在 `archived/` 下不再被遍历，脚本因"零笔记"短路退出——不是"报告通过"，而是**该校验对归档区永不适用**。结论（归档是正文格式校验的盲区）不变，且已实测确认。
+3. **断言数以实测为准。** 评审正文记 97/97（当时正确），修复批新增用例后为 **111/111**；CI 注释里被 #4 指出的 "50" 是更早的过期值。
 
 ## 复现方式
 
 在仓库根目录运行：
 
 ```bash
-npm run verify-notes      # 通过：9 篇笔记，0 篇归档，封印一致
-npm run test-gates        # 通过：97/97
+npm run verify-notes      # 通过：12 篇笔记，0 篇归档，2 对双语笔记同步
+npm run test-gates        # 通过：111/111
 ```
 
 针对发现 #1 的独立复现（临时宿主，非本仓库）：
 
 ```bash
 # 建一篇缺 ## Alternatives considered 的 implemented 笔记
-# 跑 archive-agent-note.ts —— 成功归档
-# 跑 verify-archived-agent-notes.ts —— 报告 ok: 1 archived note(s) verified
-# 但同一篇笔记若跑 verify-agent-note-format.ts 会被拒绝
+# 跑 verify-agent-note-format.ts —— 拒绝（首个信号）
+# 修复前：archive-agent-note.ts 照常归档，且此后格式门禁对该笔记永不适用
+# 修复后：归档命令同样拒绝，源文件字节不变、archived/ 不被创建
 ```
 
 ## 总体评价
@@ -94,11 +102,24 @@ const PATH_RE = /\.agents\/notes\/([^\s'"`)>]+?\.md)/;
 - 现在时 / 不得改写决策的纪律，在 `SKILL.md`、`note-format.md`、`when-to-write.md` 表述一致。
 - 头块契约（第 3 行 `Status`、第 4 行紧邻 `Archived`）由归档命令与校验器以相同方式强制。
 
-## 后续动作（待决定，尚未执行）
+## 处置结果（修复批已执行，非提案）
 
-拟议顺序：
+按原拟顺序逐项落地；决策全文见两篇 `implemented` 笔记。
 
-1. 发现 #1：归档时增加正文格式校验。
-2. 发现 #3 / #4 / #5：一行级文档修正。
-3. 发现 #2：让锚点路径模式从 `AGENT_NOTE_ROOT` 推导。
-4. 发现 #6：需先决定采用 `.zh.md` 配对还是记录例外。
+| # | 处置 | 落点 |
+|---|---|---|
+| 1 | 正文规则提取为共享 `validateNoteContent`，归档命令在**写入任何文件前**调用；补负例断言 | [归档前跑完整格式校验…](.agents/notes/implemented/bug-fix/2026-10-15-archive-body-gate-and-anchor-root.md) |
+| 2 | 锚点匹配改为锚定笔记自身的 `{lifecycle}/{class}/file.md`，不再依赖路径前缀写法；补自定义根目录行为断言 | 同上 |
+| 3 | 中英两版 `references/verification.md` 改为主用 `AGENT_NOTE_CODE_ROOTS`，注明单数旧名兼容 | [本仓库的英文笔记另存为 `-en.md`…](.agents/notes/implemented/process/2026-10-15-bilingual-note-pairing-exception.md) |
+| 4 | `.github/workflows/verify.yml` 的断言数由 50 更新为当前值 | 同上 |
+| 5 | `README.md` 宿主脚本示例统一为 `archive-agent-note` | 同上 |
+| 6 | 拍板为**保留 `-en.md` 例外**，并新增 `verify-bilingual-notes.ts` 比较两端二级标题序列、日期与状态行；已并入本仓库 `verify-notes` / `verify-notes-en` | 同上 |
+| 7 | 漏译守卫从只扫 `SKILL.md` 扩到英文版全部文档，允许清单补入门禁接受的中文状态行写法 | 同上 |
+
+小问题中「混合行尾归一化」未改：它只影响 `--superseded-by` 插入链接时的后继笔记，且归档快照本身保字节；留待有实际宿主信号时再动。
+
+验证：`npm run verify-notes` 通过（12 篇笔记、0 篇归档、2 对双语同步），`npm run test-gates` 111/111 通过。
+
+## 证据附件
+
+`REVIEW.md` 保留评审当时的原文与行号，作为证据快照；行号、断言数、笔记计数随后变化即失效，判断当前状态请重跑上文的复现命令，而不是引用文中数字。

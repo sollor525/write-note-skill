@@ -2,8 +2,8 @@
 // 从仓库根目录运行 npm run test-gates，需要 Node 和 Git；缺少 Git 会使测试失败。
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
-import { mkdirSync, cpSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -342,6 +342,53 @@ check("archive: --strict fails while inbound links remain", run("strict", "archi
     ".agents/notes/implemented/architecture/2026-01-01-old.md", "--strict",
 ]), 1);
 
+// 归档是笔记变永久的一刻；正文缺小节时格式门禁会拒绝，归档命令必须同样拒绝且不动任何文件。
+const noAlternatives = `${HEAD("no alternatives", "implemented")}
+## Problem
+
+P.
+
+## Decision
+
+D.
+
+## Consequences
+
+C.
+`;
+put("archive-body", ".agents/notes/implemented/architecture/2026-01-01-no-alt.md", noAlternatives);
+check("archive body: format gate rejects the source", run("archive-body", "verify-agent-note-format.ts"), 1);
+check("archive body: archiving rejects what the format gate rejects", run("archive-body", "archive-agent-note.ts", [
+    ".agents/notes/implemented/architecture/2026-01-01-no-alt.md",
+]), 1);
+check("archive body: source retained after refusal", readFileSync(join(BASE, "archive-body", ".agents/notes/implemented/architecture/2026-01-01-no-alt.md"), "utf8") === noAlternatives ? 1 : 0, 1);
+check("archive body: nothing was sealed", existsSync(join(BASE, "archive-body", ".agents/notes/archived")) ? 0 : 1, 1);
+
+// implemented 笔记残留提案标题同样被两条路径一致拒绝。
+put("archive-banned", ".agents/notes/implemented/architecture/2026-01-01-banned.md", `${HEAD("banned heading", "implemented")}
+## Problem
+
+P.
+
+## Decision
+
+D.
+
+## Alternatives considered
+
+- **A** — b.
+
+## Plan
+
+P.
+
+## Consequences
+
+C.
+`);
+rejects("archive-banned", "verify-agent-note-format.ts", [], /banned in implemented/);
+rejects("archive-banned", "archive-agent-note.ts", [".agents/notes/implemented/architecture/2026-01-01-banned.md"], /fails the body format gate/);
+
 // Git 基线用例需要可用的子进程；环境不满足时记录失败，不能假报全部通过。
 const gitUsable = (() => {
     const probe = join(BASE, "git-probe");
@@ -412,6 +459,45 @@ for (const edition of EDITIONS) {
     check(`${edition}: SKILL.md present`, existsSync(skillPath(edition, "SKILL.md")) ? 1 : 0, 1);
 }
 
+// 锚点检查必须尊重 AGENT_NOTE_ROOT：笔记放在 docs/adr/ 的宿主里，真实锚点不能被当成"缺路径"。
+const anchorHost = "anchors";
+put(anchorHost, "docs/adr/implemented/bug-fix/2026-01-02-custom-root.md", IMPL("custom root"));
+put(anchorHost, "docs/adr/implemented/bug-fix/2026-01-03-dangling.md", IMPL("dangling"));
+put(anchorHost, "src/anchored.ts", [
+    "// Note: docs/adr/implemented/bug-fix/2026-01-02-custom-root.md is the decision",
+    "export const a = 1;",
+].join("\n"));
+put(anchorHost, "src/dangling.ts", [
+    "// Note: docs/adr/implemented/bug-fix/2026-01-09-missing.md",
+    "export const b = 2;",
+].join("\n"));
+const anchorRun = captured(anchorHost, "check-note-anchors.ts", [], {
+    AGENT_NOTE_ROOT: join(BASE, anchorHost, "docs/adr"),
+    AGENT_NOTE_CODE_ROOTS: join(BASE, anchorHost, "src"),
+});
+check("anchors: exits 0 (soft report)", anchorRun.status === 0 ? 1 : 0, 1);
+// 该小节只在存在缺路径锚点时打印；自定义根目录能识别真实锚点，就应该整段消失。
+check("anchors: custom root anchor is recognised, not reported as missing a path", /anchors without note path/.test(anchorRun.stdout) ? 0 : 1, 1);
+check("anchors: dangling anchor is reported", /2026-01-09-missing\.md does not exist/.test(anchorRun.stdout) ? 1 : 0, 1);
+check("anchors: anchored implemented note is not listed as unanchored", /without any code anchor\] 1 of 2/.test(anchorRun.stdout) ? 1 : 0, 1);
+if (/anchors without note path/.test(anchorRun.stdout) || !/without any code anchor\] 1 of 2/.test(anchorRun.stdout)) {
+    console.log(anchorRun.stdout, anchorRun.stderr);
+}
+
+// 本仓库的 `-en.md` 双语笔记是自觉的例外，但没有机制就会漂移；守卫必须抓住结构不同步。
+const pairHost = "pairs";
+put(pairHost, ".agents/notes/implemented/architecture/2026-02-01-base.md", IMPL("base"));
+put(pairHost, ".agents/notes/implemented/architecture/2026-02-01-base-en.md", IMPL("base"));
+check("bilingual pair: in sync passes", run(pairHost, "verify-bilingual-notes.ts"), 0);
+put(pairHost, ".agents/notes/implemented/architecture/2026-02-01-base-en.md", `${IMPL("base")}
+## Extra section
+
+Only the English copy has this.
+`);
+rejects(pairHost, "verify-bilingual-notes.ts", [], /section skeleton differs/);
+put(pairHost, ".agents/notes/implemented/architecture/2026-02-01-orphan-en.md", IMPL("orphan"));
+rejects(pairHost, "verify-bilingual-notes.ts", [], /English note has no base note/);
+
 // frontmatter 名称必须与目录一致，防止安装冲突。
 for (const edition of EDITIONS) {
     const head = readFileSync(skillPath(edition, "SKILL.md"), "utf8").split("\n").slice(0, 5).join("\n");
@@ -419,23 +505,36 @@ for (const edition of EDITIONS) {
     check(`${edition}: frontmatter has a description`, /^description:\s*\S/m.test(head) ? 1 : 0, 1);
 }
 
-// 英文版文档只允许保留门禁支持的中文标题别名，其余中文说明视为漏译。
+// 英文版文档只允许保留门禁支持的中文别名与状态行示例；其余中文说明视为漏译。
+// 扫描范围覆盖英文版全部文档（SKILL.md 与 references/），而不只是 SKILL.md。
 const ALLOWED_CHINESE = new Set([
+    // 门禁接受的中文状态行写法（note-format.md 用它举例说明）。
+    "状态", "已实现",
+    // 门禁接受的中文标题别名：问题/决策/备选方案等。
     "问题", "决策", "备选方案", "已考虑的替代方案", "备选", "后果", "提议", "方案", "提案",
     "决定", "影响", "结果", "风险", "验收标准", "验收条件", "接受标准", "计划", "规划", "迁移计划",
     "替代方案",
 ]);
-const strayChinese = (file) => {
-    const text = readFileSync(skillPath("write-notes-en", file), "utf8");
+/** 递归收集英文版文档；代码里的中文注释是已记录的取舍，不在此列。 */
+const enDocs = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return enDocs(full);
+    return entry.name.endsWith(".md") ? [full] : [];
+});
+const enDocRoot = skillPath("write-notes-en", "");
+const strayChinese = (files) => {
     const found = new Set();
-    for (const m of text.matchAll(/[\u4e00-\u9fff]+/g)) {
-        if (!ALLOWED_CHINESE.has(m[0])) found.add(m[0]);
+    for (const file of files) {
+        const text = readFileSync(file, "utf8");
+        for (const m of text.matchAll(/[\u4e00-\u9fff]+/g)) {
+            if (!ALLOWED_CHINESE.has(m[0])) found.add(`${m[0]} (${relative(enDocRoot, file)})`);
+        }
     }
     return [...found];
 };
-const enStraySkill = strayChinese("SKILL.md");
-check("write-notes-en: SKILL.md has no untranslated Chinese", enStraySkill.length === 0 ? 1 : 0, 1);
-if (enStraySkill.length) console.log(`    untranslated: ${enStraySkill.join(", ")}`);
+const enStrayDocs = strayChinese(enDocs(enDocRoot));
+check("write-notes-en: all docs have no untranslated Chinese", enStrayDocs.length === 0 ? 1 : 0, 1);
+if (enStrayDocs.length) console.log(`    untranslated: ${enStrayDocs.join(", ")}`);
 const zhText = readFileSync(skillPath("write-notes", "SKILL.md"), "utf8");
 check("write-notes: SKILL.md is in Chinese", /[\u4e00-\u9fff]/.test(zhText) ? 1 : 0, 1);
 
@@ -445,6 +544,7 @@ const SHARED = [
     "scripts/archive-agent-note.ts",
     "scripts/check-note-anchors.ts",
     "scripts/note-sections.ts",
+    "scripts/verify-bilingual-notes.ts",
     "scripts/note-parser.mjs",
     "scripts/seal-store.ts",
     "scripts/file-updates.ts",
