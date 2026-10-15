@@ -278,7 +278,7 @@ npx tsx .agents/skills/write-notes/scripts/check-note-anchors.ts
 {
   "scripts": {
     "verify-notes": "npx tsx .agents/skills/write-notes/scripts/verify-agent-note-tree.ts && npx tsx .agents/skills/write-notes/scripts/verify-agent-note-format.ts && npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts",
-    "archive-note": "npx tsx .agents/skills/write-notes/scripts/archive-agent-note.ts"
+    "archive-agent-note": "npx tsx .agents/skills/write-notes/scripts/archive-agent-note.ts"
   }
 }
 ```
@@ -387,7 +387,7 @@ npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes
 
 维护本仓库时，在仓库根目录执行：中文版用 `npm run verify-notes` / `init-board` / `bundle-board`，英文版用 `npm run verify-notes-en` / `init-board-en`；`board.html` 和 `demo.html` 均为生成产物（已在 `.gitignore` 中排除）。下游项目需自行配置上文的 npm scripts。
 
-运行 `npm run test-gates` 可直接验证门禁本身：它建一批临时宿主项目，逐条断言这些"本该失败"的情况确实失败——空笔记根目录不放行、中文骨架能通过、点目录不再是隐形通道、归档分类封闭集、封印被改/被删/被手放进来都会红、CRLF 笔记能正常归档且不混行尾、`--write` 无法重封被编辑的内容，以及在 git 基线对照下重封篡改内容会被抓住。它还断言两个语言版本没有跑偏：frontmatter 名字与目录一致、英文版里没有漏译的中文（门禁接受的中文小节别名除外）、共享脚本逐字节相同、两版 SKILL.md 的相对链接都能解析、英文版自己的门禁能跑通英文笔记。这是改门禁或改文档后最该跑的一条命令。
+运行 `npm run test-gates` 可直接验证门禁本身：它建一批临时宿主项目，逐条断言这些"本该失败"的情况确实失败——空笔记根目录不放行、中文骨架能通过、点目录不再是隐形通道、归档分类封闭集、封印被改/被删/被手放进来都会红、CRLF 笔记能正常归档且不混行尾、`--write` 无法重封被编辑的内容、缺备选方案的笔记无法归档、自定义笔记根目录下的锚点能被识别，以及在 git 基线对照下重封篡改内容会被抓住。它还断言两个语言版本没有跑偏：frontmatter 名字与目录一致、英文版全部文档里没有漏译的中文（门禁接受的中文小节别名与状态行写法除外）、共享脚本逐字节相同、两版 SKILL.md 的相对链接都能解析、英文版自己的门禁能跑通英文笔记、本仓库的 `-en.md` 双语笔记标题结构与状态一致。这是改门禁或改文档后最该跑的一条命令。
 
 运行 `npm run test-skill-install` 会在临时宿主项目里做一遍安装后的端到端检查：从本仓库本地路径安装到 Codex / Gemini CLI 等共用的 `.agents/skills/`，以及 Claude Code 的 `.claude/skills/`，核对交付的文件与内容、断言 Claude Code 拿到的确实是指向通用目录的链接、在宿主里跑三个校验脚本、归档一篇笔记并重新校验、生成两种看板。固定使用 `skills@1.7.1`，覆盖默认链接与 `--copy` 两种方式；需要联网获取 CLI 与 tsx。
 

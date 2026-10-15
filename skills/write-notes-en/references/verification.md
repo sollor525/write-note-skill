@@ -23,7 +23,10 @@
    - **Degraded mode must be loud**: without an explicit baseline, when git is absent or cannot run (sandbox, permissions), it prints an explicit "external witness missing" warning instead of passing silently. The seal history lives inside this repo; only an external baseline can truly prove that nobody changed it.
 
 4. **`check-note-anchors`** (`scripts/check-note-anchors.ts`, soft report, exit code always 0, **not in CI**)
-   - Scans source code (root given by the env var `AGENT_NOTE_CODE_ROOT`, default cwd; node_modules/.git/dist and the like are skipped automatically) for physical `// Note:` / `# Note:` anchors: it reports dangling anchors, implemented notes that no anchor points at, and anchor lines missing their path. If the host does not use anchors, there is no need to run it.
+   - Scans source code (roots given by the env var `AGENT_NOTE_CODE_ROOTS` — several paths separated by the platform path delimiter; the legacy singular `AGENT_NOTE_CODE_ROOT` is still honoured; default cwd; node_modules/.git/dist and the like are skipped automatically) for physical `// Note:` / `# Note:` anchors: it reports dangling anchors, implemented notes that no anchor points at, and anchor lines missing their path. Anchors are recognised from the notes root's own directory name plus the `{lifecycle}/{class}/file.md` triple, so a host that keeps its notes outside `.agents/notes/` (for example `docs/adr/`) is scanned with its real prefix and absolute, repo-relative and file-relative anchor spellings all resolve to the same note. If the host does not use anchors, there is no need to run it.
+
+5. **`verify-bilingual-notes`** (`scripts/verify-bilingual-notes.ts`, optional, used by this repository itself)
+   - A project that keeps its own bilingual notes outside the `<base>.md` + `<base>.zh.md` convention can compare the two sides mechanically: this script checks that an English note sharing a base filename agrees with its base note on the `## ` heading sequence, the first-proposed date and the status line. It does not compare prose meaning. Wire it into your own pipeline only if you adopt such a convention; the three gates above stay the host's contract.
 
 ## An empty root does not pass
 

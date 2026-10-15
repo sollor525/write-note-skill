@@ -23,7 +23,10 @@
    - **降级要响**：未显式指定基线且没有 git、或 git 无法执行（沙箱、权限）时打印"外部见证缺失"的明确警告，不静默通过。封印史在本仓库内，只有外部基线能真正证明没人改过。
 
 4. **`check-note-anchors`**（`scripts/check-note-anchors.ts`，软报告，退出码恒 0，**不进 CI**）
-   - 扫描源码（env `AGENT_NOTE_CODE_ROOT` 指定根，默认 cwd；自动跳过 node_modules/.git/dist 等）里的 `// Note:` / `# Note:` 物理锚点：报告悬空锚点、没有锚点指向的 implemented 笔记、缺路径的锚点行。宿主没用锚点就不必跑。
+   - 扫描源码（env `AGENT_NOTE_CODE_ROOTS` 指定一个或多个根，多个按平台路径分隔符连接；旧名单数 `AGENT_NOTE_CODE_ROOT` 仍兼容；默认 cwd；自动跳过 node_modules/.git/dist 等）里的 `// Note:` / `# Note:` 物理锚点：报告悬空锚点、没有锚点指向的 implemented 笔记、缺路径的锚点行。锚点由笔记根目录自身的目录名加 `{lifecycle}/{class}/file.md` 三段识别，所以笔记放在 `.agents/notes/` 之外的宿主（例如 `docs/adr/`）按真实前缀扫描，绝对路径、相对仓库根、相对书写文件三种写法都指向同一篇笔记。宿主没用锚点就不必跑。
+
+5. **`verify-bilingual-notes`**（`scripts/verify-bilingual-notes.ts`，可选，本仓库自用）
+   - 项目若在 `<base>.md` + `<base>.zh.md` 约定之外自行维护双语笔记，可以用它机械比对两侧：同基底文件名的英文笔记与基础笔记的 `## ` 标题序列、首次提出日、状态行必须一致。不比较正文语义。只有采用这类约定时才接进自己的流水线；上面三个门禁仍是宿主的契约。
 
 ## 空根不放行
 

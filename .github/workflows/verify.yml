@@ -1,7 +1,7 @@
 # CI for this repository (the skill's own gates, not a host project's).
 #
 # Two jobs:
-#   gates   — offline: the 50-case regression suite for the gate scripts
+#   gates   — offline: the 111-case regression suite for the gate scripts
 #   install — networked: the real `skills` CLI, so the paths the README promises
 #             (universal .agents/skills/ and Claude Code's .claude/skills/) are
 #             actually verified rather than assumed
