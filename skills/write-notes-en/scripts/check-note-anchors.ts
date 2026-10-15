@@ -1,5 +1,10 @@
 /**
- * Soft report: physical reverse anchors (`// Note: ... 见 .agents/notes/...`).
+ * Soft report: physical reverse anchors (a source comment carrying `Note:`
+ * followed by a path under the notes root).
+ * Anchors are recognised by the notes root's own directory name plus the
+ * `{lifecycle}/{class}/file.md` triple, both taken from AGENT_NOTE_ROOT, so
+ * hosts that keep their notes outside `.agents/notes/` (for example
+ * `docs/adr/`) are scanned with their real prefix instead of a hard-coded one.
  *   A. anchors in source code pointing at notes that do not exist (dangling)
  *   B. implemented notes with zero inbound code anchors (suspected missing anchor)
  * Exit code is always 0 — this is an advisory report, not a gate.
@@ -39,7 +44,31 @@ const SKIP_DIR = new Set([
   ".cache", ".agents", "vendor", "target",
 ]);
 const ANCHOR_RE = /(?:\/\/|#|\/\*|\*\s*|<!--\s*)\s*Note[:：]/;
-const PATH_RE = /\.agents\/notes\/([^\s'"`)>]+?\.md)/;
+
+/** 把路径片段转成可嵌入正则的字面量。 */
+const escapePath = (p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * 锚点里的笔记路径锚定在笔记自身的 `{lifecycle}/{class}/file.md` 三段上，
+ * 不再假设前缀写法：绝对路径、相对仓库根、相对书写文件三种写法都得到同一结果，
+ * 也不需要把 AGENT_NOTE_ROOT 之外的绝对前缀写进正则。
+ * 三段之前必须出现笔记根目录自身的最后一段（`.agents/notes` → notes，`docs/adr` → adr），
+ * 否则 `src/implemented/foo/bar.md` 这类用户代码路径会被误报成悬空锚点。
+ * 该段同样以分隔符或字符串起始为界，避免把 `notnotes/` 之类的片段当成笔记根目录。
+ */
+const notesRootTail = escapePath(agentNoteRoot.split(/[\\/]/).filter(Boolean).pop() ?? "");
+const NOTE_PATH_RE = new RegExp(`(?:^|[\\\\/])${notesRootTail}[\\\\/](proposed|implemented|rejected)[\\\\/]([^\\s'"\`)>\\\\/]+?)[\\\\/]([^\\s'"\`)>\\\\/]+?\\.md)`);
+
+/**
+ * 从锚点行取出笔记根目录内的相对路径；匹配不到时返回 null，
+ * 便于调用方区分"缺路径的锚点"与"指向不存在笔记的悬空锚点"。
+ */
+function noteKeyFrom(line: string): string | null {
+    const m = NOTE_PATH_RE.exec(line);
+    if (!m) return null;
+    // 三段固定，不含 .. 或绝对前缀，join(agentNoteRoot, key) 可直接拼路径。
+    return `${m[1]}/${m[2]}/${m[3]}`;
+}
 
 const anchorHits = new Map<string, string[]>(); // note rel (from notes root, lowercased basename fallback) -> [code rel:line]
 const dangling: string[] = [];
@@ -63,23 +92,24 @@ function walk(dir: string, depth: number, root: string) {
     }
     const dot = entry.name.lastIndexOf(".");
     if (dot === -1 || !CODE_EXT.has(entry.name.slice(dot))) continue;
+    // 门禁回归测试里内嵌锚点夹具（含刻意缺路径的样例），不是真实引用。
+    if (entry.name === "test-gates.mjs") continue;
     const rel = full.slice(root.length + 1);
     const lines = readFileSync(full, "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       if (!ANCHOR_RE.test(l)) continue;
-      const m = PATH_RE.exec(l);
-      if (!m) {
-        notePathRefs.push(`${rel}:${i + 1} — Note anchor without a .agents/notes path`);
+      const key = noteKeyFrom(l);
+      if (!key) {
+        // 锚点行没有指向任何笔记根目录下的路径，提示实际使用的根目录而不是写死的 .agents/notes。
+        notePathRefs.push(`${rel}:${i + 1} — Note anchor without a path under ${agentNoteRoot}`);
         continue;
       }
-      const noteRel = m[1].split("#")[0].replace(/^\.\//, "");
-      const key = noteRel.replace(/\\/g, "/");
       const list = anchorHits.get(key) ?? [];
       list.push(`${rel}:${i + 1}`);
       anchorHits.set(key, list);
       if (!existsSync(join(agentNoteRoot, key))) {
-        dangling.push(`${rel}:${i + 1} — .agents/notes/${key} does not exist`);
+        dangling.push(`${rel}:${i + 1} — ${key} does not exist under ${agentNoteRoot}`);
       }
     }
   }

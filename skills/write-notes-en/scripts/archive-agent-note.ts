@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { AGENT_NOTE_CLASSES, agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
-import { NOTE_PARSER, statusGrammarFor } from "./note-sections.ts";
+import { NOTE_PARSER, statusGrammarFor, validateNoteContent } from "./note-sections.ts";
 import { prepareNewSeal, sha256 } from "./seal-store.ts";
 import { commitFileUpdates } from "./file-updates.ts";
 
@@ -50,6 +50,12 @@ function main(): void {
     const { lines } = NOTE_PARSER.mask(raw);
     if (!/^# Agent Note[:：] ?\S/.test(lines[0] ?? "") || lines[1] !== "" || !statusGrammarFor("implemented")!.test(lines[2] ?? "") || lines[3] !== "") {
         throw new Error("Source note must have a valid implemented header; run verify-agent-note-format before archiving");
+    }
+    // 归档是笔记变永久的一刻：封印前先跑一遍正文骨架校验，归档不是格式门禁的盲区。
+    const contentIssues = validateNoteContent({ raw, lifecycle: "implemented", date: (/^\d{4}-\d{2}-\d{2}/.exec(filename) ?? [""])[0] });
+    if (contentIssues.length) {
+        for (const issue of contentIssues) console.error(`format: ${rel} — ${issue.message}`);
+        throw new Error("Source note fails the body format gate; fix the sections above before archiving");
     }
 
     const archiveDir = join(agentNoteRoot, "archived");
