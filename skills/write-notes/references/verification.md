@@ -1,8 +1,28 @@
 # 按需阅读：校验脚本
 
-> SKILL §6 的展开。接入 CI 时对照；本地轻量使用时跳过。
+> 接入门禁、定位安装路径、生成看板或配置 CI 时阅读。
 
-## 检查脚本（均为 tsx，零新增依赖，均可 `npx tsx` 独立运行）
+## 已有 ADR 与本技能格式的边界
+
+随附门禁与看板解析器要求 `{lifecycle}/{class}/yyyy-mm-dd-topic.md` 以及 Agent Note 头部与章节。`AGENT_NOTE_ROOT=docs/adr` 只改变根目录，不能兼容 `docs/adr/0001-database.md`。宿主已有其他约定时保留其命名、状态、索引与校验命令；没有校验器就对照宿主模板人工复核并如实报告，不宣称本技能门禁通过，也不向不兼容记录运行这些门禁。
+
+采用严格格式是单独授权的迁移：先明确目标根目录、路径/日期/状态映射、旧理由保留与入站链接调整。不要擅自重排历史或另建平行笔记库。空根检查仍失败，沿用宿主格式不构成门禁内的豁免。
+
+## 定位并直接运行脚本
+
+以本次加载的 `SKILL.md` 所在目录为准，安装可能在项目中，也可能在全局目录。cwd 保持在宿主根，`NOTE_SKILL_DIR` 指向实际技能目录，不能误指向宿主自己的 `scripts/`。Node.js 24 可直接运行 TypeScript，不要求宿主有 `package.json`：
+
+```sh
+# 以下是路径示例，使用时替换为实际安装位置。
+NOTE_SKILL_DIR="$HOME/.codex/skills/write-notes"
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-tree.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-format.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts"
+```
+
+宿主已有 tsx 时也可用 `npx tsx <脚本>`，npx 可能下载运行器。安装技能不添加 npm 命令；只有确认宿主 `package.json` 定义了相应脚本后才能用 `npm run verify-notes` 或 `npm run init-board`。不要仅为运行这些脚本创建包清单。
+
+## 检查脚本
 
 1. **`verify-agent-note-tree`**（`scripts/agent-note-tree.ts` + `scripts/verify-agent-note-tree.ts`）
    - 校验 lifecycle 封闭集 `proposed/implemented/rejected` + `archived`、class 封闭集 6 个、路径深度 `{lifecycle}/{class}/file.md`、文件名 `yyyy-mm-dd-topic.md`、禁止 `INDEX.md`、活跃笔记内部相对 Markdown 链接有效性。
@@ -23,7 +43,8 @@
    - **降级要响**：未显式指定基线且没有 git、或 git 无法执行（沙箱、权限）时打印"外部见证缺失"的明确警告，不静默通过。封印史在本仓库内，只有外部基线能真正证明没人改过。
 
 4. **`check-note-anchors`**（`scripts/check-note-anchors.ts`，软报告，退出码恒 0，**不进 CI**）
-   - 扫描源码（env `AGENT_NOTE_CODE_ROOTS` 指定一个或多个根，多个按平台路径分隔符连接；旧名单数 `AGENT_NOTE_CODE_ROOT` 仍兼容；默认 cwd；自动跳过 node_modules/.git/dist 等）里的 `// Note:` / `# Note:` 物理锚点：报告悬空锚点、没有锚点指向的 implemented 笔记、缺路径的锚点行。锚点由笔记根目录自身的目录名加 `{lifecycle}/{class}/file.md` 三段识别，所以笔记放在 `.agents/notes/` 之外的宿主（例如 `docs/adr/`）按真实前缀扫描，绝对路径、相对仓库根、相对书写文件三种写法都指向同一篇笔记。宿主没用锚点就不必跑。
+   - 扫描源码（env `AGENT_NOTE_CODE_ROOTS` 指定一个或多个根，多个按平台路径分隔符连接；旧名单数 `AGENT_NOTE_CODE_ROOT` 仍兼容；默认 cwd；自动跳过隐藏目录、node_modules/dist 等，不豁免单个文件名）里的 `// Note:` / `# Note:` 物理锚点。每行取标记后的第一个 Markdown 路径，按完整路径解析：绝对路径直接使用，相对路径分别以宿主根目录（cwd）和源码文件目录为基准。归一化后必须位于 `AGENT_NOTE_ROOT` 内，且只有一个实际存在的目标；两种基准指向不同文件时报告歧义，改用绝对路径。报告缺路径、越界、歧义、悬空引用和无引用的 implemented 笔记；不会用同名文件或相同尾段替代原路径。
+   - 例如 `AGENT_NOTE_ROOT=docs/adr` 时，仓库相对路径 `docs/adr/implemented/architecture/2026-01-02-example.md` 与 `docs/code.ts` 中的文件相对路径 `adr/implemented/architecture/2026-01-02-example.md` 均有效。路径含空格时加引号或反引号；支持 Markdown 链接并忽略 `#fragment`。扫描是逐行文本识别，不是各语言的语法解析器；测试夹具应拼接标记，避免字符串被误当成注释。宿主没用锚点就不必跑。
 
 5. **`verify-bilingual-notes`**（`scripts/verify-bilingual-notes.ts`，可选，本仓库自用）
    - 项目若在 `<base>.md` + `<base>.zh.md` 约定之外自行维护双语笔记，可以用它机械比对两侧：同基底文件名的英文笔记与基础笔记的 `## ` 标题序列、首次提出日、状态行必须一致。不比较正文语义。只有采用这类约定时才接进自己的流水线；上面三个门禁仍是宿主的契约。
@@ -42,6 +63,24 @@
 ## 脚本路径
 
 本文的 `scripts/` 相对于 Skill 安装目录。运行命令时保持当前目录为宿主项目根目录，并使用实际 Skill 路径调用脚本；安装本身不会创建宿主 npm scripts。
+
+## 看板与归档命令
+
+笔记树兼容本格式时，使用前面已设置的 `NOTE_SKILL_DIR`：
+
+```sh
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --init board.html "项目决策看板"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --bundle .agents/notes demo.html "项目决策看板"
+node "$NOTE_SKILL_DIR/scripts/check-note-anchors.ts"
+node "$NOTE_SKILL_DIR/scripts/archive-agent-note.ts" .agents/notes/implemented/architecture/2026-01-01-example.md --strict
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts" --reseal
+```
+
+只选择需要的命令；重封是明确采纳已编辑的归档，不是日常验证。归档资格、`--superseded-by`、入站链接与删除详见[归档说明](archiving.md)。
+
+`--init` 生成查看页，打开后选择笔记目录；`--bundle` 内嵌指定笔记树，自定义兼容根目录须替换 `.agents/notes`。默认包含正文，`--metadata-only` 去掉正文与理由。两种模式都不转换平铺 ADR，也不需要 npm 初始化。两版看板界面均为中文。已有生成看板可重新生成；普通文件会被拒绝覆盖，只有明确要求的 `--force` 才覆盖。
+
+接入 CI 时，把 `templates/verify-notes.yml` 复制到宿主 `.github/workflows/`，调整安装路径并提交引用的技能文件；模板留在技能目录内不会生效。可选 npm 快捷命令只包装这些脚本。`AGENT_NOTE_ARCHIVE_BASE_REF` 指向变更前提交，两份封印文件一起提交；可写仓库里的本地封印无法独立证明历史未改。
 
 ## 一致性与失败规则
 

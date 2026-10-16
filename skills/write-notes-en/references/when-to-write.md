@@ -1,6 +1,6 @@
 # Read as needed: When to write, when to change, and how decisions flow
 
-> The deep dive behind SKILL §4. Check against it for every significant change or review.
+> The decision procedure behind SKILL §1 and lifecycle details behind §4. Read when deciding whether to write or how to update a record.
 
 ## Core mental model: update the owning note, never create a duplicate (Update the owning note)
 
@@ -11,18 +11,26 @@ A note is never rewritten into a different decision: facts (paths, symbols, defa
 
 ---
 
-## 1. Scenario decision matrix
+## 1. Ordered decision procedure
 
-| Scenario | Action | Typical pattern |
+First read the host convention and search for an owning decision. Apply the first matching case below; classification comes afterwards.
+
+| Situation | Action | Example |
 |---|---|---|
-| **Code refactor, rename, package move, default-parameter change** | **Update the existing note's facts in place** | The core rationale of the Decision is unchanged; edit the path, class name, or default value directly (do not append a change log). If the rationale changed, create a new note instead of editing in place |
-| **Before writing a new note** | **Audit the active notes on the spot** | Search proposed + implemented + rejected by module name/keyword; classify every hit on the spot (unrelated / partial overlap / fully absorbed / stale proposal) and land that together with the new note. Never defer it to a cleanup sweep |
-| **Proposing a brand-new architecture or technology choice** | **Create a new note in `proposed/`** | Before you write code, spell out the motivation, the alternatives you genuinely considered, and the acceptance criteria |
-| **Finishing development and preparing to merge to main** | **Move it to `implemented/`** | See the rewrite checklist in §3; land it in the same batch as the code (in a git workflow, the same commit/PR) |
-| **A new decision partially supersedes the plan** | **Keep both notes and cross-link them** | Update only the facts that still hold. Do not archive |
-| **The plan is rejected in review** | **Move it to `rejected/` or delete it** | Keep it, with the reason written out, only when that reason can stop a future repeat; otherwise delete it outright |
-| **A new architecture completely replaces the old one** | **Absorb first, delete if you can, otherwise archive** | See §4. Write the pointer in the new note, not in the archived one |
-| **Version tagging, a minor dependency patch, formatting** | **No new note required** | Do not create a note; still update affected facts in existing notes |
+| Existing decision, same rationale, changed facts | Update the owning record | A renamed module or adjusted timeout must stay accurate; no duplicate note |
+| Existing decision or its rationale is reversed | Create a successor and preserve the old reasoning | A durability requirement replaces an in-memory-only queue |
+| No owner, but a new lasting constraint, contract, or non-obvious tradeoff | Create a note | Other services must now honor a new wire version or consistency boundary |
+| No affected decision facts and no new rationale beyond code/tests | No new note | Fix an off-by-one error to restore an already documented limit |
+
+Behavior changes prompt this judgment; they do not automatically require a note. Routine CRUD, formatting, styling, a straightforward rename, and a behavior-preserving dependency patch need no new record unless they affect existing decision facts. A tiny change with a consequential operational compromise still deserves a record. A postmortem warrants a note when it identifies a lasting constraint or prevention rule, not merely because an error happened.
+
+Before creating, classify related records as unrelated, partially overlapping, fully absorbed, or an unimplemented proposal deliberately abandoned. Cross-link partial overlaps; do not silently rewrite an old choice.
+
+## Host formats and authorized work
+
+For existing ADRs, keep the host's layout, status vocabulary and checks. The guidance above applies without importing this skill's header, folder, index or archive rules. Changing `AGENT_NOTE_ROOT` is not a schema migration; see [verification](verification.md).
+
+Inspect facts yourself. Ask together only about unresolved material choices, such as an unauthorized migration or compatibility boundary. Already authorized work proceeds without another confirmation. Write a proposal before a new implementation when a new decision is needed; completing it moves that same record to implemented. Do not create a second record merely to mark completion.
 
 ---
 
@@ -40,6 +48,8 @@ When the module an existing note guards evolves, but its core decision has not b
 
 ## 3. proposed → implemented rewrite checklist
 
+Choose status by whether the proposal was implemented: no remaining work after completion means `implemented`; only an unimplemented, deliberately abandoned proposal becomes `rejected`.
+
 Do all of this in the same change:
 
 1. Move it to `implemented/<class>/`; the date in the filename does not change (it is the date of first proposal)
@@ -54,7 +64,7 @@ The gate catches this through the skeleton change: a leftover `## Proposal` in a
 
 ## 4. Supersession: partial overlap vs. full absorption
 
-**Partial overlap**: the new plan covers only part of the old one → keep both notes, add relative links in both directions, and update only the facts that still hold. Do not archive; do not defer.
+**Partial overlap**: the new plan covers only part of the old one → keep both notes and add relative links in both directions. At the start of the old note's `Problem`, prominently identify the superseded portion and its successor. Preserve the original rationale and the still-valid decision; update facts only within that surviving scope. Do not archive the still-active record.
 
 **Full absorption** (the old plan is eliminated outright):
 

@@ -3,7 +3,7 @@
 - 日期：2026-10-15（评审基线 `7612ae3`；修复批同日落在其后）
 - 评审对象：`skills/write-notes-en/`（英文版技能；共享逻辑与 `skills/write-notes/` 逐字节相同）
 - 评审范围：`SKILL.md`、`references/`（7 篇）、`scripts/`、`templates/`、本仓库自用方式（`.agents/notes/`、`.github/workflows/verify.yml`、`README.md`）
-- 状态：**7 项发现已全部处置**（见文末「处置结果」）；评审原文保留为证据，未逐句改写
+- 状态：**原 7 项发现已处置**；2026-10-16 补充复核的 4 项问题也已修复，另有设计优化建议（见末尾）。初次评审原文保留为证据。
 
 ## 复核修正（2026-10-15，修复批）
 
@@ -109,17 +109,60 @@ const PATH_RE = /\.agents\/notes\/([^\s'"`)>]+?\.md)/;
 | # | 处置 | 落点 |
 |---|---|---|
 | 1 | 正文规则提取为共享 `validateNoteContent`，归档命令在**写入任何文件前**调用；补负例断言 | [归档前跑完整格式校验…](.agents/notes/implemented/bug-fix/2026-10-15-archive-body-gate-and-anchor-root.md) |
-| 2 | 锚点匹配改为锚定笔记自身的 `{lifecycle}/{class}/file.md`，不再依赖路径前缀写法；补自定义根目录行为断言 | 同上 |
+| 2 | 按完整路径解析并检查 `AGENT_NOTE_ROOT` 边界，补齐绝对路径、仓库相对路径、文件相对路径和错误前缀用例；初版尾段匹配已被替代 | [完整锚点路径解析](.agents/notes/implemented/bug-fix/2026-10-16-resolve-full-note-anchor-paths.md) |
 | 3 | 中英两版 `references/verification.md` 改为主用 `AGENT_NOTE_CODE_ROOTS`，注明单数旧名兼容 | [本仓库的英文笔记另存为 `-en.md`…](.agents/notes/implemented/process/2026-10-15-bilingual-note-pairing-exception.md) |
-| 4 | `.github/workflows/verify.yml` 的断言数由 50 更新为当前值 | 同上 |
+| 4 | `.github/workflows/verify.yml` 改为描述离线回归套件，用例数以实际测试输出为准 | 同上 |
 | 5 | `README.md` 宿主脚本示例统一为 `archive-agent-note` | 同上 |
 | 6 | 拍板为**保留 `-en.md` 例外**，并新增 `verify-bilingual-notes.ts` 比较两端二级标题序列、日期与状态行；已并入本仓库 `verify-notes` / `verify-notes-en` | 同上 |
 | 7 | 漏译守卫从只扫 `SKILL.md` 扩到英文版全部文档，允许清单补入门禁接受的中文状态行写法 | 同上 |
 
 小问题中「混合行尾归一化」未改：它只影响 `--superseded-by` 插入链接时的后继笔记，且归档快照本身保字节；留待有实际宿主信号时再动。
 
-验证：`npm run verify-notes` 通过（12 篇笔记、0 篇归档、2 对双语同步），`npm run test-gates` 111/111 通过。
+2026-10-15 修复批验证：`npm run verify-notes` 通过（12 篇笔记、0 篇归档、2 对双语同步），`npm run test-gates` 111/111 通过。后续结果见下文。
 
 ## 证据附件
 
 `REVIEW.md` 保留评审当时的原文与行号，作为证据快照；行号、断言数、笔记计数随后变化即失效，判断当前状态请重跑上文的复现命令，而不是引用文中数字。
+
+## 补充复核与修复（2026-10-16）
+
+本次修复基线为 `f9366db`。新增回归用例先在原实现上运行，复现 10 个失败场景；修复后全部通过。
+
+| 已确认问题 | 当前处理 |
+|---|---|
+| 错误的完整路径因尾段相同而被当作有效引用 | 保留完整路径，归一化后检查根目录边界和实际目标；取消同名文件兜底 |
+| `notes/...` 与源码旁的 `adr/...` 被漏检 | 相对路径分别按宿主根和源码目录解析；两个不同目标同时存在时报告歧义 |
+| 任意宿主的 `test-gates.mjs` 都不扫描 | 删除文件名豁免；本仓库夹具改为拼接 Note 标记 |
+| 已完成的评审清单被标记为 rejected | 移到 implemented，移除提案段；两版技能说明补明完成与放弃的区别 |
+
+锚点依旧是逐行文本软报告，不要求宿主添加引用。当前仓库扫描无悬空或无效锚点；13 篇 implemented 笔记均未配置源码锚点，符合其可选定位。
+
+验证：`npm run test-gates` 为 **130/130**；两版笔记检查、skill frontmatter 检查和共享文件一致性检查通过。新增用例覆盖路径边界、相对路径、文件名、Markdown 链接、空格、歧义以及新旧扫描根变量。本轮未改变安装布局，未重跑需要联网的安装测试；未在 Windows 上执行。
+
+## GitHub 同类设计对比
+
+本次读取以下项目的公开 `SKILL.md`，比较其职责、记录方式和决策维护规则；这是文档与源码设计对比，未安装或运行这些第三方 skill。链接指向本次读取的分支，后续内容可能变化。
+
+| 对比对象 | 已观察到的设计 | 对本 skill 的启示 |
+|---|---|---|
+| [wshobson/agents：architecture-decision-records](https://github.com/wshobson/agents/blob/main/plugins/documentation-generation/skills/architecture-decision-records/SKILL.md) | 聚焦架构选择，区分应记录与可跳过的工作，模板按需读取，使用 ADR 状态和相互链接 | 学习明确触发边界及按需模板；无需引入其团队审批人数要求 |
+| [pavi2410/agent-skills：architecture-decisions](https://github.com/pavi2410/agent-skills/blob/main/skills/architecture-decisions/SKILL.md) | 先读现行决策索引；旧决策加醒目的替代说明及后继链接，保留原理由 | 学习让读者先看到“哪部分已失效”；本项目已有分类树与链接，无需照搬手工集中索引 |
+| [ArcticZvan/project-memory](https://github.com/ArcticZvan/project-memory/blob/main/SKILL.md) | 每日记录配合项目摘要；错误或被替代的条目会关联修正记录 | 说明跨会话恢复与决策记录是不同职责；可借鉴纠错关系，不必把每次会话都写成决策笔记 |
+| [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files/blob/master/skills/planning-with-files/SKILL.md) | 分别保存计划、研究发现和进度，提供恢复、任务目录选择及完成检查 | 临时执行状态应与长期决策分开；无需引入其完整计划文件、自动钩子和会话恢复流程 |
+
+本 skill 的明确价值是把“为什么这样改”与路径、正文、归档封印检查结合，并把事实修正和决策翻转分开处理。上述项目提供的主要借鉴是触发边界、现行决策识别与任务状态分工；没有证据表明应替换现有封印机制或引入更多生命周期。
+
+## 后续优化实施（2026-10-16）
+
+四项建议已实现，原来的格式门禁和归档约束保持不变。
+
+| 优化 | 实现 |
+|---|---|
+| 统一触发判断 | 中英文入口、分类说明、流转参考和 README 使用相同顺序：先查归属，事实更新；决定或理由改变则新建后继；新增隐藏约束或取舍才新建；普通恢复既定行为的局部修复不自动建笔记 |
+| 明确已有 ADR 边界 | 现有平铺 ADR 保持宿主格式和检查；没有宿主校验器时如实报告人工审阅。`AGENT_NOTE_ROOT` 只换根路径，迁移须有明确范围，不生成平行库、不放宽空根门禁 |
+| 模型行为评测 | `evals/note-behavior/` 的隔离场景实际调用 Codex，检查文件动作、独立代码断言与真实门禁，另留语义评审项。CI 只运行离线评分器测试；完成、拒绝、部分替代和已有 ADR 均有场景 |
+| 压缩入口 | 英文入口从约 3,000 词缩至约 1,080 词；安装位置、CI、覆盖行为、封印及看板选项移入既有参考。两种看板命令仍在入口，宿主无需 package.json |
+
+部分替代在旧篇 Problem 开头醒目标明失效范围和后继链接，保留仍有效的决定与原理由。没有引入必填集中索引、新状态或固定文件数量阈值。
+
+执行方式与结果含义见[行为评测说明](evals/README.md)。130 项门禁回归、13 项离线评分器测试及真实安装检查已经通过；英文版八个真实模型场景及中文版两个代表场景均通过，差异与内容复核见[评测记录](evals/results/2026-10-16.md)，不能用格式通过代替语义正确。入口字数减少也不是质量提高的独立证据。

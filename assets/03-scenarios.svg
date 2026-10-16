@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 828" width="100%" height="100%">
-  <title>什么样的决定值得记:非平凡六触发、豁免清单与三个方向</title>
+  <title>什么样的决定值得记：先查归属，再选择更新、新建或不写</title>
   <defs>
     <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
@@ -16,20 +16,20 @@
     .code { font-family: 'JetBrains Mono', monospace; }
   </style>
 
-  <!-- Background -->
+  <!-- 背景 -->
   <rect width="100%" height="100%" fill="#f8fafc"/>
   <rect width="100%" height="100%" fill="url(#light-grid)"/>
 
-  <!-- HEADER -->
+  <!-- 标题 -->
   <g transform="translate(80, 12)">
-    <text x="0" y="82" fill="#0f172a" font-size="40" font-weight="800">判定只有一条：非平凡改动，必须留笔记</text>
-    <text x="0" y="120" fill="#64748b" font-size="18">对齐被强制的门</text>
+    <text x="0" y="82" fill="#0f172a" font-size="40" font-weight="800">先查归属，再判断是否有长期理由</text>
+    <text x="0" y="120" fill="#64748b" font-size="18">已有事实就地更新；新约束与取舍才新建</text>
   </g>
 
-  <!-- MAIN · lead-in -->
-  <text x="80" y="196" fill="#0f172a" font-size="20" font-weight="800">命中任何一项，就必须留笔记：</text>
+  <!-- 判断提示 -->
+  <text x="80" y="196" fill="#0f172a" font-size="20" font-weight="800">这些改动需要判断，不是自动新建的条件：</text>
 
-  <!-- ============ SIX NON-TRIVIAL ITEMS ============ -->
+  <!-- 六类需要判断的改动 -->
   <!-- 1 行为 -->
   <g transform="translate(80, 216)">
     <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
@@ -40,7 +40,7 @@
     <text x="20" y="156" fill="#334155" font-size="15">顺序、默认值、报错</text>
     <text x="20" y="180" fill="#334155" font-size="15">口径，动一个都算。</text>
     <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
-    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">检查决策</text>
   </g>
 
   <!-- 2 架构 -->
@@ -54,7 +54,7 @@
     <text x="20" y="180" fill="#334155" font-size="15">错了方向，后面全</text>
     <text x="20" y="204" fill="#334155" font-size="15">是返工。</text>
     <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
-    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">检查决策</text>
   </g>
 
   <!-- 3 跨文件契约 -->
@@ -67,7 +67,7 @@
     <text x="20" y="156" fill="#334155" font-size="15">改另一边的约定，</text>
     <text x="20" y="180" fill="#334155" font-size="15">漏一处就坏。</text>
     <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
-    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">检查决策</text>
   </g>
 
   <!-- 4 流程与工具链 -->
@@ -81,7 +81,7 @@
     <text x="20" y="180" fill="#334155" font-size="15">一变，换个机器就</text>
     <text x="20" y="204" fill="#334155" font-size="15">露馅。</text>
     <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
-    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">检查决策</text>
   </g>
 
   <!-- 5 测试策略 -->
@@ -94,7 +94,7 @@
     <text x="20" y="156" fill="#334155" font-size="15">不测、为什么，漏</text>
     <text x="20" y="180" fill="#334155" font-size="15">一个等于白测。</text>
     <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
-    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">检查决策</text>
   </g>
 
   <!-- 6 落盘·网络·配置格式 -->
@@ -108,16 +108,16 @@
     <text x="20" y="156" fill="#334155" font-size="15">络的格式和配置项，</text>
     <text x="20" y="180" fill="#334155" font-size="15">改了就得安排迁移。</text>
     <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
-    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">检查决策</text>
   </g>
 
-  <!-- EXEMPTION STRIP -->
+  <!-- 无需新建时的事实同步提示 -->
   <g transform="translate(80, 512)">
     <rect x="0" y="0" width="1240" height="64" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="620" y="41" fill="#475569" font-size="16" font-weight="700" text-anchor="middle">纯机械局部改动直接交代码：<tspan font-weight="500">改样式 · 格式化 · 打标 · 不改行为的依赖补丁 · 常规 CRUD · 或日后会被重访的决定也算</tspan></text>
+    <text x="620" y="41" fill="#475569" font-size="16" font-weight="700" text-anchor="middle">没有额外理由则不新建：<tspan font-weight="500">恢复既定行为的局部修复 · 样式 · 格式化 · 常规 CRUD；已有笔记事实仍需同步</tspan></text>
   </g>
 
-  <!-- SUB · directions -->
+  <!-- 记录理由的三个方向 -->
   <text x="80" y="624" fill="#0f172a" font-size="20" font-weight="800">写的时候，想清楚这笔决定守住哪个方向：</text>
 
   <!-- 往前看 · 立新规 -->

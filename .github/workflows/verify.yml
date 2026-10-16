@@ -1,10 +1,9 @@
-# CI for this repository (the skill's own gates, not a host project's).
+# 本仓库的 CI；宿主项目使用 skill 内的工作流模板。
 #
-# Two jobs:
-#   gates   — offline: the 111-case regression suite for the gate scripts
-#   install — networked: the real `skills` CLI, so the paths the README promises
-#             (universal .agents/skills/ and Claude Code's .claude/skills/) are
-#             actually verified rather than assumed
+# 两个独立任务：
+#   gates   — 离线运行门禁回归测试，用例数以测试输出为准。
+#   install — 联网调用实际 skills CLI，验证 README 中声明的
+#             .agents/skills/ 与 Claude Code .claude/skills/ 安装路径。
 name: verify
 
 on:
@@ -30,16 +29,18 @@ jobs:
         with:
           node-version: 24
 
-      # Note there is deliberately no AGENT_NOTE_ARCHIVE_BASE_REF here: this
-      # repository has no archived notes yet, so the append-only comparison is a
-      # no-op. Once a note is archived, add the env back and point it at the
-      # pre-change commit (PR base, or github.event.before) -- see the template
-      # in skills/write-notes/templates/verify-notes.yml for the exact form.
+      # 本仓库尚无归档，暂不配置 AGENT_NOTE_ARCHIVE_BASE_REF。
+      # 首次归档后必须指向变更前提交（PR 基线或 github.event.before），
+      # 具体配置见 skills/write-notes/templates/verify-notes.yml。
       - name: Verify note tree, format and archive seals
         run: npm run verify-notes
 
       - name: Gate regression suite (behaviour cases + edition drift guard)
         run: npm run test-gates
+
+      # 这里只测评分器；真实模型评测显式运行，不在 PR 中消耗模型用量。
+      - name: Behavior evaluation grader regression suite
+        run: npm run test-evals
 
   install:
     runs-on: ubuntu-latest
@@ -52,7 +53,6 @@ jobs:
         with:
           node-version: 24
 
-      # Fetches skills@1.7.1 and tsx, then installs both language editions into
-      # a throwaway host project for Codex, Claude Code, Gemini CLI and Copilot.
+      # 获取 skills@1.7.1 和 tsx，在临时宿主验证两版技能的多种安装路径。
       - name: Install into a scratch host and exercise the gates there
         run: npm run test-skill-install

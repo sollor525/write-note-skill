@@ -1,203 +1,89 @@
 ---
 name: write-notes
-description: Use when a change is non-trivial (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates. Mechanical edits need no new note, but affected existing facts stay synchronized.
+description: Record durable engineering decisions, constraints, and rejected alternatives; maintain existing decision notes as code changes. Use for new or revised technical choices, cross-module contracts, postmortems, explicit note maintenance, and decision-note boards. Ordinary local fixes need no new note unless they introduce a lasting constraint or tradeoff. Chinese edition.
 ---
 
 # Write Notes
 
-> 聊天里的 Agent 负责拆任务、排计划；本 Skill 只做一件事：为什么这样改、放弃了什么、怎么证明改对了，都留在一处，给下一个改这段代码的人用。
+把决定为何成立、放弃了什么、如何验证留在代码旁，方便后来者检索。用户指令和宿主 `AGENTS.md`、`CLAUDE.md` 优先。
 
-## 红线：先判要不要写，再谈怎么写
+## 0. 确认宿主约定
 
-模型有迎合强迫症，动不动就想立 Note。先过这道闸：
+先读宿主指南、查找既有决策记录，再决定是否创建目录。
 
-**先分清三种动作：不新建、同步已有笔记、新建笔记。以下纯机械或局部改动不新建 Note；已有笔记提及受影响的路径、符号或参数时，仍要同步事实。没有对应记录时直接改代码：**
+- **已有 ADR 或其他决策格式**：保留其位置、文件名、头部、状态、索引和校验命令，在原格式内应用本技能的写作原则。不向不兼容记录强加本技能的目录、门禁、归档封印或看板解析器。
+- **已采用本技能格式**：沿用配置的笔记根目录与配套检查。
+- **没有现成约定**：真正需要笔记时使用 `.agents/notes/`，只创建用到的目录。普通修复不初始化空笔记树。
 
-- 纯排版格式化、错别字、无歧义重命名
-- 样式调整（不改行为）
-- 依赖补丁（不改行为）、版本发布打标（RC/Release tag）
-- 常规 CRUD、单模块内看 diff 即懂的显式逻辑修复（无跨文件影响）
+`AGENT_NOTE_ROOT` 只改变根目录，不兼容平铺 ADR 或其他格式。只有用户明确授权迁移范围时才迁移既有记录。详见[校验与接入](references/verification.md)。
 
-**判定标准：非平凡改动必须写。** 命中以下任何一项即非平凡——改了**行为**、改了**架构**、改了**跨文件契约**、改了**流程与工具链**、改了**测试策略**、改了**落盘 / 网络 / 配置格式**——或其他维护者日后可能重访的决定。
+## 1. 选择不写、更新或新建
 
-**写之前，对照三个方向想清楚这篇笔记守住什么：**
+先检索决定归属，再按顺序判断：
 
-1. **往前看（立新规）**——新建的跨模块通信契约、状态流转规则、访问边界、运行时不变量。不记，后来的 Agent 各写一套、随意击穿模块。
-2. **往回看（记妥协）**——为看不见的约束放弃了业界主流或直觉的解法。不记，被否掉的老路会被重走一遍。
-3. **做减法（收窄）**——破坏性重构、代码裁剪、API 暴露面收窄。不记，没人知道退出条件和迁移边界，减法做不下去——或者做过了头。
-
-一句话记住：**代码和单测说不出来的意图、边界、取舍，就是非平凡。** 判不准时，从严。
-
-> 对 AI 来说，写在散文里的规矩等于没有规矩——能机械检查的纪律都有脚本兜底（见 §6）；决定翻转、当场审计、现在时正文靠操作流，不靠词法扫描。
-> 优先级：宿主项目的 `AGENTS.md` / `CLAUDE.md` 与用户的直接指令**高于本 Skill**；本 Skill 是默认契约，不是更高法律。
-
-| 内心的借口 | 现实 |
+| 情况 | 动作 |
 |---|---|
-| "只是改个默认值/重命名" | 默认值和命名都是决策事实；原地更新老笔记只要 30 秒 |
-| "先合并，以后再补" | 以后 = 永远不会；腐化从每一篇"以后补"开始 |
-| "代码即文档" | 代码只说**是什么**，说不出**为什么**和**放弃了什么** |
-| "改动很小，犯不着" | 规模小 ≠ 不用记；一个重试参数曾引发全网故障 |
-| "不确定要不要写" | 对照上面的非平凡清单：命中就写，不命中就不写。别拿这句话当挡箭牌 |
+| 已有笔记负责该决定，只改变路径、符号、参数等事实 | 原位更新，即使代码只是机械改动 |
+| 决定本身或选择理由变化 | 新建决定并与旧文互链，保留旧理由 |
+| 没有归属笔记，新增了代码与测试无法解释的长期约束、契约或取舍 | 新建笔记 |
+| 没有受影响的决策事实，也没有新的长期理由 | 直接改代码，不新增笔记 |
 
-- **优先就地同步，非必要不新建**：这类笔记库的演进形态很一致：Note 的新增很少，变更大头是原地修正现有 Note 的事实（路径、类名、默认参数），而不是开新文件。已有归属的改动直接更新那篇！
-- **禁止把一篇 Note 改成另一个决定**：事实（路径、符号、默认值）就地改；决定或理由翻转 → 新开一篇并互链。禁止把 `## Decision` 改写成反面，禁止只靠 git 当旧理由的唯一副本。
-- **写新篇当场审计，不准推迟**：按模块名/关键词搜 proposed + implemented + rejected；每篇命中当场分类：无关 / 部分重叠（互链）/ 完全吸收（删或归档）/ 过时提案（reject 或删）。分类结果和这篇新 Note 一起落盘。
-- **垃圾不进归档**：过时提案转 `Status: rejected — <原因>`（严禁归档）；无防坑价值的被否记录直接物理删除。
+**行为变化本身不构成写笔记的充分条件。** 恢复已有契约的局部 bug 修复、常规 CRUD、格式、样式、明确改名、依赖补丁，在 diff 与测试足以解释时不新增笔记。反之，一行重试默认值也可能承载重要运行约束，需要记录。文件数和改动大小都不是门槛。
 
-> 「决定」不重——个人项目里就是「为什么选 A 没选 B」。选型、取舍、踩过的坑，都值得写下。
+新决定应说明看不见的约束或被放弃的方案、其他模块必须遵守的边界，或删除旧能力的条件。不要把任务流水账写成决策笔记。例子与交互原则见[何时写、何时改](references/when-to-write.md)。
 
-## 0. 先探测，再落地
+## 2. 使用适用的格式
 
-别一上来建全套目录。按这个仓库现在的样子选：
+本技能格式的身份为笔记根下 `{lifecycle}/{class}/yyyy-mm-dd-topic.md`。状态转换不改首次提出日。本格式不建立集中式 `INDEX.md`。
 
-1. 有 `AGENTS.md` / `CLAUDE.md` / 贡献指南 → 读它；有 `docs/adr/`、`docs/decisions/`、Issue 模板等现成的决定记录 → 沿用，状态和种类按本 Skill 的文件夹来即可。
-2. 没有现成的决定记录 → 按标准结构建：`.agents/notes/{proposed,implemented,rejected,archived} × 6 class`，用到哪个目录就建哪个，空目录不必预建——个人写、不用 git 也照此建全套结构，别精简成单目录。
-3. 团队长期仓库 → 在相同结构上叠加流程：`CONTRIBUTING.md` / PR 模板加一句「重要改动必带一篇笔记」，并把校验脚本接进 CI。
+- 状态：`proposed` 尚未实现；`implemented` 已生效；`rejected` 明确否决；`archived` 冻结的实现快照。
+- 类别：`feature`、`bug-fix`、`simplification`、`architecture`、`process`、`testing`。先决定是否需要笔记，再看[分类说明](references/classification.md)选类别。
 
-## 1. 路径即分类
+前三行为 `# Agent Note: <标题>`、空行、`Status: <状态>`，第四行空白。状态与目录一致；rejected 状态行附理由。
 
-每条 Note 的路径就是身份：`{lifecycle}/{class}/yyyy-mm-dd-topic.md`
+- 提案：`Problem`、`Proposal`、`Alternatives considered`、`Acceptance criteria`、`Risks`。
+- 实现：`Problem`、`Decision`、`Alternatives considered`、`Consequences`，可补充验证和设计章节。
+- 否决：保留提案，结论写在状态行。
 
-**Lifecycle（一层文件夹，这篇走到哪一步）：**
+使用二级标题，首节为 `Problem`。实现决策用现在时，删除提案期章节。详见[格式与支持的中文别名](references/note-format.md)及 `templates/`。已有宿主 ADR 仍保留原骨架。
 
-- `proposed` — 想法阶段，有了方案但还没落地
-- `implemented` — 已落地，与代码同批改动保持同步
-- `rejected` — 审慎否掉的提案，仅当能防止重犯时保留，否则删整组
-- `archived` — 已完成且未来参考价值低的 implemented 记录，冻结不可改
+## 3. 检索并处理关联记录
 
-**Class（二层文件夹，就这 6 个；再加要改检查脚本）：**
+沿已有源码锚点或模块文档链接查找，按状态与类别缩小范围，再用 `rg --hidden` 搜关键词并排除根目录下 `archived/`。自定义根目录须同时替换检索路径与排除路径。先读替代关系，再把旧决定用于当前代码。
 
-- `feature` 新能力 — 用户或模型看得见的选择（不显然的行为也算）
-- `bug-fix` 修缺陷 — 修好了什么，或补上复盘里暴露的缺口
-- `simplification` 只删不增 — 不增加能力，只删代码、行为或表面
-- `architecture` 结构怎么搭 — 发出去的源码怎么组织、包怎么连
-- `process` 工具和流程 — 检查、发布、怎么协作（围着代码转，不是运行时行为）
-- `testing` 测试怎么写 — 测试策略和基建
+新建前将相关记录分为：无关、部分重叠需互链、完全吸收、尚未实现且明确放弃的提案。与新笔记一起说明重叠如何处理。不要仅为检索而给源码添加锚点。
 
-> `refactor` 不单列：能看见的行为变了，归到对应类；没变就是 `simplification`。不建 `INDEX.md`。细判据见 `references/classification.md`。
+## 4. 保持状态与理由准确
 
-## 2. 文件格式（检查脚本会核对）
+- 已授权的实现完成后，把提案移到 `implemented`，保留日期，将 `Proposal` 改为 `Decision`，将验收条件与风险并入影响或验证，与代码同批交付。
+- 实现完成所以没有待办，属于 **implemented**。只有尚未实现且明确否掉的选择才是 rejected；仅在其理由能防止重犯时保留。
+- 部分替代：两篇都保留并互链，在 `Problem` 开头醒目标明被取代范围及后继文档。保留仍有效的决定和旧理由。
+- 完全替代：新文承接独有理由、备选、影响与验证限制，修复入站链接。完全吸收后可删除旧活跃记录；仍有独立历史价值时才归档。
+- 只用 `scripts/archive-agent-note.ts` 归档 implemented 笔记，不改写冻结快照。本地封印验证一致性，CI 需要变更前 Git 基线才能检测历史改写。归档、删除、重封前阅读[归档规则](references/archiving.md)。
 
-前三行固定：
+## 5. 写作与复核
 
-```markdown
-# Agent Note: <标题>
+只写真实考虑过的备选，不设最低数量。先说对手方案最强的理由，再解释放弃原因。交代收益、成本、限制及可核对的验证结果。笔记之间用相对 Markdown 链接。
 
-Status: <状态>
-```
+只询问尚未决定的重要取舍；能查明的事实自行查明，已授权工作直接推进。新建笔记不产生额外批准要求。
 
-状态必须与所在 lifecycle 文件夹一致（`rejected` 带一句话原因）；文件名日期是**首次提出日**。Body 骨架：
+修改笔记后运行宿主适用的检查，并做[语义自检](references/quality-gate.md)，简短报告结果与缺口。按需阅读[表达检查](references/prose-checklist.md)和[简化检查](references/simplification-checklist.md)。
 
-- `proposed`：`## Problem` → `## Proposal` → …自由节… → `## Alternatives considered` → `## Acceptance criteria` → `## Risks`
-- `implemented`：`## Problem` → `## Decision`（现在时） → …自由节… → `## Alternatives considered` → `## Consequences`
-- `rejected`：冻结的 proposal 形态，结论在 `Status:` 行
+## 6. 校验与生成看板
 
-> 备选方案必填：只记录真实考虑过的对手方案，先写它最强的理由再否定。没有过的选项不要编。「不做 / 复用现状」仅当当时真的权衡过才写。脚本只检查有没有 `## Alternatives considered`（或到目前接受的中文别名：`## 替代方案` / `## 已考虑的替代方案` / `## 备选方案` / `## 备选`，权威清单见 `scripts/note-sections.ts`）。
-> 首节必须是 `## Problem` 或 `## 问题`——中文骨架整篇可用（`## 问题` / `## 决策` / `## 备选方案` / `## 后果` 都能过门禁）。`implemented` 的 `## Decision` 用现在时；门禁只拒提案标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria` 及其中文别名）。展开见 `references/note-format.md`。
-
-模板见 `templates/`。
-
-## 3. 动手前检索历史决策（去中心化 4 法）
-
-动手重构或选型前，先查历史约束，防止重复踩坑或破坏前人妥协：
-
-1. **入口注释（若有）**：代码入口若已有 `// Note: ... 见 .agents/notes/...`，顺着它读。没有就走下面三法，不要为了检索去补锚点。
-2. **分类树物理切片**：不扫全库，按意图直切目录（架构看 `implemented/architecture/`，避坑看 `rejected/`）。
-3. **精准全局检索**：使用 ripgrep 搜关键词或机制名，**必带 `--hidden` 并排除 `archived/`**：
-   ```bash
-   rg --hidden --glob '!.agents/notes/archived/**' "<机制名或关键词>" .agents/notes/
-   ```
-4. **模块文档下钻**：子模块 README 涉及设计依据时，顺着相对 Markdown 链接直达对应 Note。
-
-**问用户之前，先自己查。** 以上四法能答的事实，不要抛给用户；只有真正的决策才占用用户时间。
-
-## 4. 什么时候写、什么时候改
-
-**对话里的触发信号**——用户或自己说出这类话，就该动笔（文首红线清单里的机械改动除外，别拿这些短语当过度记录的理由）：
-
-- 拍板新路线："就选 X"、"决定用 X"、"我们先用 X 顶着" → 触发 Note
-- 比较中："X 和 Y 怎么选"、"为什么倾向 X" → 触发备选记录
-- 同一段理由被解释了第二遍 → 该写下来了
-
-判定与操作流：
-
-- **既有架构重构 / 路径迁移 / 参数改动** → **【首选原地同步】**：直接在持有该决定的老 Note 里修正事实（代码路径、方法签名、默认值），不另起新篇，也不要在正文追加流水账历史。`## Decision` 核心理由不变；理由变了就走新建。
-- **写新 Note 之前** → 按模块名/关键词搜活跃笔记，当场分类（见文首「当场审计」），禁止留到以后大扫除。
-- **新想法、还没动手** → 先写 `proposed`（为什么想这么做、考虑过哪几条路），评审完再动手。交互纪律见下。
-- **施工完（proposed → implemented）**，同一次改动里做完：① 移到 `implemented/<class>/`，文件名日期不动；② `Status: proposed` → `Status: implemented`；③ `## Proposal` → 现在时 `## Decision`；④ `## Acceptance criteria` / `## Risks` 折进 `## Consequences`（或现在时 `## Testing`）；⑤ 删计划段。与代码同批落盘——**git 场景即同一 commit/PR**。
-- **方案被新决策部分取代** → 两篇都留，双方加相对链接；只更新仍成立的事实。禁止归档。
-- **方案被新决策完全取代** → 新 Note 接管并写入旧篇全部独特理由/备选/后果/验证缺口；入站链接改完后，能删则删，不能删（旧篇仍有独立杠杆）再 `archive-agent-note.ts`。指针写在新笔记里，不写进归档篇。
-- **免新建场景**：见文首清单；不新建笔记，但已有笔记中的事实仍与代码同步。
-
-**交互协议（向用户提问时）：**
-
-1. **先分 facts 和 decisions**：环境里查得到的事实（代码、笔记树、rg）自己查完再问；只有真正要拍板的取舍才占用用户时间。
-2. **一轮全抛**：所有待拍板的问题编号列出，每题独立一行给推荐答案 `➡️ <推荐>`；用户按编号批量应答（"1 yes，2 第二个选项"），不挤牙膏、不来回试探。
-3. **只确认尚未解决的重要取舍**：涉及未授权的范围、兼容性或明显风险时，先完成可独立推进的调查和草稿，再集中确认剩余决定。用户已经明确的选择和已授权工作直接执行，不重复索取确认；笔记记录这些选择。
-4. **开放决策超过五个是信号，不是配额**：说明这次改动太大——拆成多篇笔记，或先交 proposed 草稿走评审，别在一次对话里硬塞。
-
-> 判定细则见 `references/when-to-write.md`，归档与删除见 `references/archiving.md`。
-
-## 5. 怎么写好
-
-- `## Consequences` 同时写**代价和收益**，不是只写"放弃了什么"。
-- 自由节（package 拓扑、wire 契约、schema 等）放在 `Decision` 与 `Alternatives` 之间，保持可检索的机制名与 `must / may / never` 时序强调。
-- 跨 Note 引用用相对 Markdown 链接 `[topic](../../implemented/architecture/2026-…-….md)`，不要裸数字，以便机械可校验。
-- 宿主若已有此惯例，可在核心入口留一行 `// Note: ... 见 .agents/notes/...`；不是门禁。决定被取代时，这些注释是要同步的代码清单。
-- 文风与去推导痕迹见 `references/prose-checklist.md`；简化机会见 `references/simplification-checklist.md`。
-- 写完后过一遍 `references/quality-gate.md` 的语义自检，只向用户报**缺口和写得好的地方**（≤5 行），缺口给具体修法。结构靠脚本，意思靠人点头。
-
-## 6. 校验与运维命令
-
-在仓库根目录直接运行（已配置 npm script 时）：
+在**宿主根目录**执行，以本次加载的 `SKILL.md` 所在目录设置 `NOTE_SKILL_DIR`。Node.js 24 可直接运行脚本，宿主不需要 `package.json`。下面的门禁仅用于采用本技能格式的记录：
 
 ```sh
-npm run verify-agent-note-tree     # 目录合法性、分类、文件名、笔记间相对链接（空根直接报错）
-npm run verify-agent-note-format   # 头块、状态、必备节、备选方案、implemented 禁用提案标题
-npm run verify-archived            # 归档：头部布局、分类、封印与只增不改的封印史
-npm run verify-notes               # 以上三线串跑（CI 用这个）
-npm run archive-agent-note -- <path> [--superseded-by <新笔记>] [--strict]  # 一键归档：封印 + 入站死链报告
-npm run reseal-notes               # 显式重新采纳被编辑过的归档内容（会逐条打印改了什么）
-npm run check-anchors              # 软报告：若代码里有 // Note: 锚点，做双向体检；不当 CI 门
-npm run init-board                 # 生成轻量看板 board.html（日常开发推荐）
-npm run bundle-board               # 打包内嵌全量数据的自包含 demo.html
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-tree.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-format.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts"
 ```
 
-> 语言版本：本仓库同时提供中文版（`write-notes`）与英文版（`write-notes-en`）。两个版本共用同一套校验逻辑——笔记格式、目录结构、状态词都是英文标识符，与界面语言无关。**看板界面文案目前只有中文**，英文版也复用同一份 `assets/agent-notes-board.html`；需要英文界面时改这一个文件即可（它同时被两版引用，改动会同步生效）。
-
-**封印的边界（别把它当防篡改）**：`manifest.json` 与 `.seal-ledger.json` 都在同一个仓库里，有写权限的人可以连它们一起改写。本地封印只能**留痕**；真正的证明来自外部基线——CI 里把 `AGENT_NOTE_ARCHIVE_BASE_REF` 指向变更前的 commit。所以这两个封印文件必须提交，并且必须在 CI 的对比范围内。`--write` 只新增、绝不重封已封印的内容；要采纳一处改动必须显式 `--reseal`，并在提交信息里说明。
-
-脚本位于本 Skill 的 `scripts/`，从**宿主项目根目录**调用，默认检查当前目录下的 `.agents/notes/`。先根据已加载的 `SKILL.md` 路径确定 Skill 位置，不要假定宿主根目录存在 `scripts/`，也不要切换到 Skill 目录执行。安装不会自动配置宿主的 npm scripts。
-
-**本 Skill 与具体 harness 无关**，任何能读 `SKILL.md` 的 agent 都能用：笔记格式、目录结构、状态词和门禁脚本都不依赖某个 harness。安装落点由 harness 决定，不要假定某一个：
-
-| Harness | 项目级技能目录 |
-|---|---|
-| Codex、Gemini CLI、GitHub Copilot、Cursor、OpenCode 等 | `.agents/skills/`（通用目录，多个 harness 共享） |
-| Claude Code、Windsurf | `.claude/skills/`、`.windsurf/skills/`——安装器通常建一个指向通用目录的符号链接，所以两边内容一致 |
-
-因此**先看实际路径再用**（`SKILL.md` 自己被加载的位置就是权威答案）。项目级安装到通用目录时可直接执行：
+用户明确要求决策看板时，同样调用已安装的脚本：
 
 ```sh
-npx tsx .agents/skills/write-notes/scripts/verify-agent-note-tree.ts
-npx tsx .agents/skills/write-notes/scripts/verify-agent-note-format.ts
-npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts
-npx tsx .agents/skills/write-notes/scripts/build-board.ts --init board.html "项目决策看板"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --init board.html "项目决策看板"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --bundle .agents/notes demo.html "项目决策看板"
 ```
 
-从 `.claude/skills/`、全局目录或任何其他路径加载时，把上面的前缀换成实际路径即可。看板打包参数为 `--bundle <notes目录> <输出.html> "名字"`；参数与免疫规则见 `references/verification.md`。
-
-团队可将本 Skill 的 `templates/verify-notes.yml` 复制到宿主仓库 `.github/workflows/verify-notes.yml`，调整为实际安装路径，并将项目级 Skill 文件一起提交；模板在 Skill 目录内不会执行。可在 `CONTRIBUTING.md` / PR 模板加一句「重要改动必带一篇笔记」。
-
-## References
-
-按需加载：
-
-- `references/note-format.md` — 头块与 body 骨架展开
-- `references/classification.md` — 6 class 判定与边界
-- `references/when-to-write.md` — 何时新建 / 更新 / 流转
-- `references/archiving.md` — 归档与合并删除（含"未来参考价值"判定）
-- `references/prose-checklist.md` — 行文与去泄露自检
-- `references/simplification-checklist.md` — 简化机会自检
-- `references/quality-gate.md` — 写后语义自检：Problem / Alternatives / Consequences / Verification 判定 + 汇报形态
-- `references/verification.md` — 校验脚本说明
+`--init` 创建本地目录查看页，`--bundle` 内嵌指定笔记树。兼容本格式的自定义目录须替换实际根路径。两版看板界面均为中文。安装路径、可选 npm 快捷命令、CI、覆盖保护、归档命令和打包参数见[校验说明](references/verification.md)。

@@ -1,6 +1,6 @@
 # Read as needed: Class classification
 
-> The deep dive behind SKILL §1. Check against it when choosing a class for a new note.
+> Read after deciding that a new note is needed, and only for records adopting this skill's format.
 
 ## Closed set (6 classes; adding one means changing the check scripts)
 
@@ -17,7 +17,7 @@ Rules of thumb:
 
 - `architecture` vs. `process`: the former is "what the shipped source looks like," the latter is "the toolchain and workflow around that source."
 - `refactor` gets no class of its own — separate cases with the `simplification` test, "did observable behavior change?"; unchanged behavior means `simplification`, changed behavior belongs to the matching `feature`/`bug-fix`/`architecture`.
-- Do not reserve `feature` for "new capability" only — **a behavior or product choice that is visible to users or the model and is not obvious, and that does not rise to architecture, also belongs to `feature`**. The test is "can a user or a downstream system observe the behavior," not "how much code changed." Only local implementation details, ordinary refactors, and behavior-preserving dependency patches get no note at all.
+- Do not reserve `feature` for "new capability" only — **a behavior or product choice that is visible to users or the model and is not obvious, and that does not rise to architecture, also belongs to `feature`**. The test is "can a user or a downstream system observe the behavior," not "how much code changed." This chooses a class, not whether to create a note: a local fix restoring an existing contract can need no new record even though behavior changes. Use the ordered procedure in [when to write](when-to-write.md) first.
 - When in doubt, ask who will search for this note later: capability evolution is found under `feature`, structural decisions under `architecture`, gates and releases under `process`.
 
 Semantic requirements every note must carry (things the check scripts cannot police):
@@ -30,4 +30,4 @@ Semantic requirements every note must carry (things the check scripts cannot pol
 
 `scripts/agent-note-tree.ts` defines the `AGENT_NOTE_CLASSES` constant; an unknown class folder or a stray `.md` at a lifecycle root is an error. Adding a class means changing both the constant and this document, or the check goes red immediately.
 
-The closed class set and these tests apply to note governance in any repository.
+The closed class set applies only to records adopting this skill's format; existing host ADRs keep their own categories.

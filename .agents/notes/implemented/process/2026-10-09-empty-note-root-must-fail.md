@@ -14,6 +14,8 @@ Status: implemented
 
 ## Decision
 
+这些门禁只用于采用本技能格式的笔记；沿用其他宿主 ADR 格式时使用其检查方式，见[接入边界](2026-10-16-note-routing-and-host-conventions.md)。这是调用范围，不是空根校验的豁免。
+
 `verify-agent-note-tree.ts` 与 `verify-agent-note-format.ts` 在 `notes.length === 0` 时以非零退出，并打印两行可操作的诊断：说明在哪个根目录下没找到笔记，以及两条修法（在宿主项目根目录运行，或用 `AGENT_NOTE_ROOT` 指向笔记目录）。
 
 `verify-archived-agent-notes.ts` **不受此规则约束**：归档区为空是完全合法的状态（新项目还没归档过任何东西），在那里报错会把正常仓库判红。

@@ -130,10 +130,17 @@ npx skills@1.7.1 add --help
 ## 什么样的决定值得记
 
 <p align="center">
-  <img src="assets/03-scenarios.png" alt="判定只有一条：非平凡改动必须留笔记。命中行为、架构、跨文件契约、流程工具链、测试策略、落盘网络配置格式任一项就写；写的时候想清楚守住哪个方向" width="100%" />
+  <img src="assets/03-scenarios.svg" alt="先查已有决策：事实变化就地更新；出现长期约束或取舍时新建；仅恢复既定行为且无笔记事实受影响时不写" width="100%" />
 </p>
 
-**判定标准：非平凡改动必须留笔记。** 改了**行为**、**架构**、**跨文件契约**、**流程与工具链**、**测试策略**，或**落盘 / 网络 / 配置格式**——命中任何一项就写；其他维护者日后可能重访的决定，也一样。纯机械性的局部改动（改样式、格式化、打标、不改行为的依赖补丁、常规 CRUD）直接交代码，不用记。
+**先查归属，再判断是否有代码与测试不能解释的长期理由。** 按以下顺序选择动作；行为变化本身不是“必须新建”的条件，文件数量也不是阈值。
+
+| 情况 | 动作 |
+|---|---|
+| 已有笔记的路径、符号或参数事实变化，原决定与理由不变 | 就地更新，即使只是机械改名 |
+| 已有决定或理由改变 | 新建后继，关联旧篇并保留旧理由 |
+| 没有归属，但出现长期约束、跨模块契约或不显然的取舍 | 新建笔记 |
+| 没有受影响的笔记事实，也没有额外的长期理由 | 不新建；例如修复越界错误以恢复已约定的行为 |
 
 **写的时候，想清楚这笔决定守住哪个方向：**
 
@@ -141,7 +148,7 @@ npx skills@1.7.1 add --help
 - **往回看：为看不见的约束做过的妥协。** 为了零依赖开箱即用，坚决不引入外部常驻进程；为了崩溃可恢复，宁可放弃内存缓存。当年放弃的往往是更主流、更直觉的解法——不写下来，后来的人只看见「慢」和「土」，把被否掉的路重走一遍。
 - **做减法：收窄暴露面、废弃旧东西。** 删代码、砍 API、下线旧流程——退出条件和迁移边界光看代码看不出来。不写下来，没人敢删第二刀；或者删过了头，把还在用的东西一起砍掉。
 
-**不用记的**：改样式、格式化、打个版本号、不改行为的依赖补丁和常规 CRUD——直接提交代码，别给自己加戏。过度留痕和完全不记，是同一个错误的两种样子。
+**通常无需新建**：样式、格式化、版本号、常规 CRUD，以及从代码和测试就能理解的局部修复。但已有笔记的受影响事实仍需同步；一行默认重试参数若引入重要的运行取舍，也可能需要记录。
 
 <p align="center">
   <img src="assets/05-when.png" alt="拿不准是不是非平凡时的补刀问句：光看代码和单测，后来的人推导得出为什么这样定吗？推导得出多半是平凡改动别记，推导不出就是非平凡" width="100%" />
@@ -157,7 +164,7 @@ npx skills@1.7.1 add --help
 - 目录和类别不许自造（活跃区和归档区都管）→ 树校验直接拦下「第七种分类」；
 - 老决定封存 → 只增不改的封印史，改动、删除、手放都会报警；CI 里再与变更前的提交对账。
 
-Prompt 只负责提醒，脚本负责咬合。你不需要相信 AI 的自觉，只需要相信非零退出码。
+脚本检查格式、路径和封印；是否该写、理由是否保留、完成与拒绝是否区分正确，还需要模型行为评测和内容评审。格式通过不等于决策正确。
 
 ---
 
@@ -241,38 +248,41 @@ Status: implemented
 |---|---|
 | **一个人写** | 不加。目录结构照标准建，装上 Skill 就开写；不用 git 也照常跑（但封印只能留痕，没有外部见证）。 |
 | **一个人 + git** | 加一条纪律：代码和笔记**同一次提交**，不让笔记掉队。把 `archived/manifest.json` 和 `archived/.seal-ledger.json` 一起提交，封印才开始有对账对象。 |
-| **团队开发** | 加评审、PR 模板提一句「重要改动必带一篇笔记」、CI 接上 `verify-notes` 三条校验并把基线指向变更前的 commit（见下节）。 |
+| **团队开发** | 加评审，PR 说明“不写、更新或新建”的依据；采用本格式时，CI 接上三条校验并把基线指向变更前的 commit（见下节）。 |
 
 ---
 
-## 本地校验：零依赖，`npx` 直接跑
+## 本地校验与已有 ADR 接入
 
-> 校验脚本通过 Node.js 和 `npx tsx` 运行。以下命令在宿主项目根目录执行，使用项目级安装位置 `.agents/skills/write-notes/`；若安装在 `.claude/skills/` 或全局目录，请替换为实际 Skill 路径。不要切换到 Skill 目录运行，默认检查的是当前目录下的 `.agents/notes/`。
+**已有 ADR 时，先沿用宿主格式与检查。** `docs/adr/0001-database.md` 这类平铺记录不能直接通过本 skill 的目录和正文门禁；设置 `AGENT_NOTE_ROOT` 只换根路径，不转换格式。宿主没有校验器时，按其模板审阅并如实说明。只有明确授权迁移后，才调整路径、日期、状态、正文和入站链接；不会自动重排历史或另建平行笔记库。空根门禁仍然报错，详见[接入边界](skills/write-notes-en/references/verification.md)。
+
+以下命令用于已采用本 skill 格式的记录，在**宿主项目根目录**执行。Node.js 24 可以直接运行脚本，不需要宿主有 `package.json`。先把 `NOTE_SKILL_DIR` 设置为实际加载的 `SKILL.md` 所在目录；示例为项目级中文版，英文版或全局安装请替换路径。宿主已经使用 `tsx` 时也可运行 `npx tsx <脚本>`，但 npx 可能下载执行器。
 
 ```bash
+NOTE_SKILL_DIR=".agents/skills/write-notes"
 # 1. 目录、类别、文件名、笔记之间的相对链接
-npx tsx .agents/skills/write-notes/scripts/verify-agent-note-tree.ts
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-tree.ts"
 
 # 2. 头部与骨架：状态行、必备小节、备选方案必填、implemented 禁用提案标题
-npx tsx .agents/skills/write-notes/scripts/verify-agent-note-format.ts
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-format.ts"
 
 # 3. 封存区体检：归档笔记的头部布局、分类、封印，以及与基线的只增不改（没有 git 会明确警告"外部见证缺失"）
-npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts"
 
 # 4. 老方案被取代，一键归档：只插 Archived: 一行 + 封印 + 列出谁还链着它
 #    --superseded-by 在新笔记里补互链，不写进归档篇
 #    --strict 只要还有入站链接就非零退出，调用方无法跳过修复
-npx tsx .agents/skills/write-notes/scripts/archive-agent-note.ts .agents/notes/implemented/<类别>/<文件名>.md \
+node "$NOTE_SKILL_DIR/scripts/archive-agent-note.ts" .agents/notes/implemented/<类别>/<文件名>.md \
   --superseded-by .agents/notes/implemented/<类别>/<新笔记>.md
 
 # 5. 归档内容被有意编辑后，显式重新采纳为新基线（会逐条打印改了什么）
-npx tsx .agents/skills/write-notes/scripts/verify-archived-agent-notes.ts --reseal
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts" --reseal
 
 # 6. 可选体检（只提醒不报错，不进 CI）：代码里若有 // Note: 锚点，是否指着不存在的笔记
-npx tsx .agents/skills/write-notes/scripts/check-note-anchors.ts
+node "$NOTE_SKILL_DIR/scripts/check-note-anchors.ts"
 ```
 
-配进 `package.json`：
+宿主已有 `package.json` 时，可选增加快捷命令；安装 skill 不会自动添加这些命令，无需只为运行工具创建清单：
 
 ```json
 {
@@ -294,12 +304,12 @@ npx skills add sollor525/write-note-skill --skill write-notes -y
 把以下规则加入项目的 `AGENTS.md` 或 `CLAUDE.md`，AI 就会自动遵守（装英文版时把路径换成 `.agents/skills/write-notes-en/SKILL.md`，规则本身可以照抄）：
 
 ```markdown
-## 重要改动必须留笔记
+## 决策记录与事实同步
 
-1. 非平凡改动（改了行为、架构、跨文件契约、流程与工具链、测试策略、落盘/网络/配置格式）前，遵循 .agents/skills/write-notes/SKILL.md 写或更新笔记；机械性小改（样式、格式化、打标、不改行为的补丁）直接提交。
-2. 写之前先检索 .agents/notes/ 里的同主题旧笔记：有归属就地更新；新想法先放 proposed/，落地随同代码改动转 implemented/；新方案彻底取代旧决策时，同批归档旧篇并标明被谁取代。
-3. 被放弃的方案先写它最强的理由，再解释为什么不用。
-4. 提交前跑 npm run verify-notes，红了先修再交。
+1. 遵循 .agents/skills/write-notes/SKILL.md；已有 ADR 时保留宿主约定，否则需要记录时才使用 .agents/notes/。
+2. 先检索归属：原理由不变的事实变化就地更新；决定或理由改变则新建后继；无归属但有长期约束或取舍则新建；其余不新建。普通局部修复不因行为变化就自动写一篇。
+3. 完成提案转为 implemented，主动放弃未落地方案才是 rejected。部分替代保留两篇并醒目标明范围、互链；完全替代先吸收独有理由，再按 skill 规则删除或归档。
+4. 只写实际考虑过的备选方案，先说明其优点，再解释拒绝原因。提交前运行宿主适用的检查；npm 快捷命令只在 package.json 已定义时使用。
 ```
 
 **日常使用就一句话**——像平时一样提需求，改动大的时候点名让它先立笔记：
@@ -318,9 +328,13 @@ AI 会在需要新决策时记录结构化提案；只有尚未解决的重要�
 不是必需品，只是个顺手的观察窗：一条命令生成单文件 `board.html`，双击就能看——**被引用最多的那几篇笔记**（就是这套系统里最怕碰的决定）、所有被否决方案的避坑清单、按月份的演进时间线。日常开发中它直读本地笔记目录，改了笔记切回浏览器就自动刷新；也可以打包成单文件发到网上（公开演示站就是这么来的）。
 
 ```bash
-npx tsx .agents/skills/write-notes/scripts/build-board.ts --init board.html "项目决策看板"     # 本地直读，热更新
-npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes demo.html "项目决策看板"  # 打包分发
+# Node.js 24；示例为 Codex 全局英文版，请替换为实际安装路径。
+NOTE_SKILL_DIR="$HOME/.codex/skills/write-notes-en"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --init board.html "项目决策看板"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --bundle .agents/notes demo.html "项目决策看板"
 ```
+
+第一条生成本地目录浏览器，第二条内嵌指定目录的笔记；两者都不需要 `npm init`。自定义笔记根时替换 `.agents/notes`，但看板不会转换不兼容的平铺 ADR。两种安装语言共用中文看板界面。
 
 真实界面：看板按交叉引用权重萃取出最关键的那几篇决策：
 
@@ -385,10 +399,12 @@ npx tsx .agents/skills/write-notes/scripts/build-board.ts --bundle .agents/notes
 
 `--skill` 是可选的：本仓库根目录没有 `SKILL.md`，两个 Skill 都放在安装器会递归发现的标准容器目录 `skills/` 下，`--list` 能列出 `write-notes` 与 `write-notes-en`。同一条安装命令下，`--skill write-notes-en` 装英文版、`--skill write-notes` 装中文版、两个都给就都装。
 
-维护本仓库时，在仓库根目录执行：中文版用 `npm run verify-notes` / `init-board` / `bundle-board`，英文版用 `npm run verify-notes-en` / `init-board-en`；`board.html` 和 `demo.html` 均为生成产物（已在 `.gitignore` 中排除）。下游项目需自行配置上文的 npm scripts。
+维护本仓库时，在仓库根目录执行：中文版用 `npm run verify-notes` / `init-board` / `bundle-board`，英文版用 `npm run verify-notes-en` / `init-board-en`；`board.html` 和 `demo.html` 均为生成产物（已在 `.gitignore` 中排除）。下游项目可直接运行安装目录中的脚本，npm scripts 是可选项。
 
 运行 `npm run test-gates` 可直接验证门禁本身：它建一批临时宿主项目，逐条断言这些"本该失败"的情况确实失败——空笔记根目录不放行、中文骨架能通过、点目录不再是隐形通道、归档分类封闭集、封印被改/被删/被手放进来都会红、CRLF 笔记能正常归档且不混行尾、`--write` 无法重封被编辑的内容、缺备选方案的笔记无法归档、自定义笔记根目录下的锚点能被识别，以及在 git 基线对照下重封篡改内容会被抓住。它还断言两个语言版本没有跑偏：frontmatter 名字与目录一致、英文版全部文档里没有漏译的中文（门禁接受的中文小节别名与状态行写法除外）、共享脚本逐字节相同、两版 SKILL.md 的相对链接都能解析、英文版自己的门禁能跑通英文笔记、本仓库的 `-en.md` 双语笔记标题结构与状态一致。这是改门禁或改文档后最该跑的一条命令。
 
 运行 `npm run test-skill-install` 会在临时宿主项目里做一遍安装后的端到端检查：从本仓库本地路径安装到 Codex / Gemini CLI 等共用的 `.agents/skills/`，以及 Claude Code 的 `.claude/skills/`，核对交付的文件与内容、断言 Claude Code 拿到的确实是指向通用目录的链接、在宿主里跑三个校验脚本、归档一篇笔记并重新校验、生成两种看板。固定使用 `skills@1.7.1`，覆盖默认链接与 `--copy` 两种方式；需要联网获取 CLI 与 tsx。
+
+`npm run test-evals` 离线测试行为评分器，已接入 CI。`npm run eval-notes` 则在隔离临时仓库中实际调用已登录的 Codex，覆盖不写、更新、新建、完成、拒绝、已有 ADR、部分替代及两种看板，会消耗模型用量。报告保留配置提示、文件差异、脚本检查和待人工评审项；不会把关键词命中或模型自述当作语义通过。场景、筛选方式与结果解释见[模型行为评测说明](evals/README.md)。
 
 > 该检查用的是**本地路径**安装，并不覆盖 `npx skills add sollor525/write-note-skill` 这条远程简写；远程安装请在真实宿主项目里跑一次上面「选语言安装」里的命令确认。

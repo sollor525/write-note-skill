@@ -21,6 +21,8 @@
     "export-assets": "bash scripts/export-assets.sh",
     "sync-editions": "node scripts/sync-editions.mjs --write",
     "test-gates": "node scripts/test-gates.mjs",
-    "test-skill-install": "node scripts/test-skill-install.mjs"
+    "test-skill-install": "node scripts/test-skill-install.mjs",
+    "test-evals": "node --test scripts/test-note-behavior.mjs",
+    "eval-notes": "node scripts/eval-note-behavior.mjs"
   }
 }

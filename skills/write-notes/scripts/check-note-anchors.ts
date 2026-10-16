@@ -1,157 +1,146 @@
 /**
- * Soft report: physical reverse anchors (a source comment carrying `Note:`
- * followed by a path under the notes root).
- * Anchors are recognised by the notes root's own directory name plus the
- * `{lifecycle}/{class}/file.md` triple, both taken from AGENT_NOTE_ROOT, so
- * hosts that keep their notes outside `.agents/notes/` (for example
- * `docs/adr/`) are scanned with their real prefix instead of a hard-coded one.
- *   A. anchors in source code pointing at notes that do not exist (dangling)
- *   B. implemented notes with zero inbound code anchors (suspected missing anchor)
- * Exit code is always 0 — this is an advisory report, not a gate.
- *
- * Env:
- *   AGENT_NOTE_CODE_ROOTS (default: cwd) — one or more source roots to scan,
- *     separated by the platform path delimiter. Use this to name the code
- *     directories explicitly. The default scans the current directory, which is
- *     often the repository root; note trees are still skipped either way,
- *     because a note is not code.
- *   AGENT_NOTE_CODE_ROOT (legacy, single root) is still honoured.
- *
- * Run: npx tsx <skill-dir>/scripts/check-note-anchors.ts
+ * 源码锚点软报告：核对注释中的 Note 标记与完整 Markdown 路径。
+ * 报告缺路径、越界、歧义、悬空引用和无引用的 implemented 笔记；正常报告退出码为 0。
+ * 从宿主根目录运行，AGENT_NOTE_ROOT 指定笔记根，默认 .agents/notes。
+ * AGENT_NOTE_CODE_ROOTS 按平台路径分隔符指定扫描范围，兼容旧单数变量；默认 cwd。
+ * 扫描最多深入 12 层，跳过隐藏目录、依赖和构建输出；不按单个文件名豁免。
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
 
-// Note trees are not code: anchors live in source files, and descending into
-// `.agents/` would only re-read the notes themselves. This is deliberate, and
-// it is the single place that decision lives — the walker below no longer
-// carves out a `.agents` exception that the skip list immediately overrode.
+// 扫描范围不参与仓库相对路径解析；相对路径仍以启动脚本的宿主根目录为基准。
 const codeRoots = (process.env.AGENT_NOTE_CODE_ROOTS
-  ?? process.env.AGENT_NOTE_CODE_ROOT
-  ?? process.cwd())
-  .split(delimiter)
-  .map((p) => p.trim())
-  .filter(Boolean)
-  .map((p) => resolve(p));
+    ?? process.env.AGENT_NOTE_CODE_ROOT
+    ?? process.cwd())
+    .split(delimiter)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => resolve(p));
 const CODE_EXT = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-  ".py", ".go", ".rs", ".java", ".kt", ".c", ".cc", ".cpp", ".h", ".hpp",
-  ".cs", ".rb", ".swift", ".vue", ".svelte", ".php",
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".py", ".go", ".rs", ".java", ".kt", ".c", ".cc", ".cpp", ".h", ".hpp",
+    ".cs", ".rb", ".swift", ".vue", ".svelte", ".php",
 ]);
 const SKIP_DIR = new Set([
-  "node_modules", ".git", "dist", "build", "out", "coverage", ".next",
-  ".cache", ".agents", "vendor", "target",
+    "node_modules", ".git", "dist", "build", "out", "coverage", ".next",
+    ".cache", ".agents", "vendor", "target",
 ]);
 const ANCHOR_RE = /(?:\/\/|#|\/\*|\*\s*|<!--\s*)\s*Note[:：]/;
-
-/** 把路径片段转成可嵌入正则的字面量。 */
-const escapePath = (p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/**
- * 锚点里的笔记路径锚定在笔记自身的 `{lifecycle}/{class}/file.md` 三段上，
- * 不再假设前缀写法：绝对路径、相对仓库根、相对书写文件三种写法都得到同一结果，
- * 也不需要把 AGENT_NOTE_ROOT 之外的绝对前缀写进正则。
- * 三段之前必须出现笔记根目录自身的最后一段（`.agents/notes` → notes，`docs/adr` → adr），
- * 否则 `src/implemented/foo/bar.md` 这类用户代码路径会被误报成悬空锚点。
- * 该段同样以分隔符或字符串起始为界，避免把 `notnotes/` 之类的片段当成笔记根目录。
- */
-const notesRootTail = escapePath(agentNoteRoot.split(/[\\/]/).filter(Boolean).pop() ?? "");
-const NOTE_PATH_RE = new RegExp(`(?:^|[\\\\/])${notesRootTail}[\\\\/](proposed|implemented|rejected)[\\\\/]([^\\s'"\`)>\\\\/]+?)[\\\\/]([^\\s'"\`)>\\\\/]+?\\.md)`);
+// 只提取完整路径，不裁剪目录前缀；带空格的路径须加引号或反引号。
+// Markdown 链接的括号和片段标识不是文件路径的一部分。
+const NOTE_PATH_RE = /`([^`]+\.md)(?:#[^`]*)?`|"([^"]+\.md)(?:#[^"]*)?"|'([^']+\.md)(?:#[^']*)?'|([^\s'"`()<>\[\]]+?\.md)(?=$|[\s'"`()<>\[\]#.,;:])/;
 
 /**
- * 从锚点行取出笔记根目录内的相对路径；匹配不到时返回 null，
- * 便于调用方区分"缺路径的锚点"与"指向不存在笔记的悬空锚点"。
+ * 将完整路径按绝对、宿主根相对或源码文件相对语义解析，返回笔记根内的候选路径。
+ * 只做路径归一化与边界判断，不读取文件；越界返回空数组，同一路径只保留一次。
  */
-function noteKeyFrom(line: string): string | null {
-    const m = NOTE_PATH_RE.exec(line);
-    if (!m) return null;
-    // 三段固定，不含 .. 或绝对前缀，join(agentNoteRoot, key) 可直接拼路径。
-    return `${m[1]}/${m[2]}/${m[3]}`;
+function candidatePaths(path: string, source: string): string[] {
+    const candidates = isAbsolute(path)
+        ? [resolve(path)]
+        : [resolve(process.cwd(), path), resolve(dirname(source), path)];
+    return [...new Set(candidates)].filter((candidate) => {
+        const rel = relative(agentNoteRoot, candidate);
+        return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    });
 }
 
-const anchorHits = new Map<string, string[]>(); // note rel (from notes root, lowercased basename fallback) -> [code rel:line]
+// 完整的根内相对路径 → 源码位置列表；不允许用同名文件替代另一个生命周期或分类。
+const anchorHits = new Map<string, string[]>();
+// 诊断只保存在本次进程中，每个报告小节最多输出 20 条。
 const dangling: string[] = [];
 const notePathRefs: string[] = [];
 
-function walk(dir: string, depth: number, root: string) {
-  if (depth > 12) return;
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    // Skip dot-entries (node_modules, .git, .agents, editor state, …) uniformly.
-    if (entry.name.startsWith(".")) continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (!SKIP_DIR.has(entry.name)) walk(full, depth + 1, root);
-      continue;
+/**
+ * 只读扫描一个源码根，记录锚点和诊断；深度超限或 I/O 失败时警告并继续其他文件。
+ * 路径越界、相对路径歧义和缺失目标均不算有效引用，报告始终保留原始路径供定位。
+ */
+function walk(dir: string, depth: number, root: string): void {
+    if (depth > 12) {
+        console.warn(`warning: source depth limit reached, skipped: ${dir}`);
+        return;
     }
-    const dot = entry.name.lastIndexOf(".");
-    if (dot === -1 || !CODE_EXT.has(entry.name.slice(dot))) continue;
-    // 门禁回归测试里内嵌锚点夹具（含刻意缺路径的样例），不是真实引用。
-    if (entry.name === "test-gates.mjs") continue;
-    const rel = full.slice(root.length + 1);
-    const lines = readFileSync(full, "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i];
-      if (!ANCHOR_RE.test(l)) continue;
-      const key = noteKeyFrom(l);
-      if (!key) {
-        // 锚点行没有指向任何笔记根目录下的路径，提示实际使用的根目录而不是写死的 .agents/notes。
-        notePathRefs.push(`${rel}:${i + 1} — Note anchor without a path under ${agentNoteRoot}`);
-        continue;
-      }
-      const list = anchorHits.get(key) ?? [];
-      list.push(`${rel}:${i + 1}`);
-      anchorHits.set(key, list);
-      if (!existsSync(join(agentNoteRoot, key))) {
-        dangling.push(`${rel}:${i + 1} — ${key} does not exist under ${agentNoteRoot}`);
-      }
+    let entries;
+    try {
+        entries = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        console.warn(`warning: cannot scan ${dir}: ${error}`);
+        return;
     }
-  }
+    for (const entry of entries) {
+        if (entry.name.startsWith(".")) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            if (!SKIP_DIR.has(entry.name)) walk(full, depth + 1, root);
+            continue;
+        }
+        const dot = entry.name.lastIndexOf(".");
+        if (dot === -1 || !CODE_EXT.has(entry.name.slice(dot))) continue;
+        const rel = relative(root, full);
+        let lines: string[];
+        try {
+            lines = readFileSync(full, "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+        } catch (error) {
+            console.warn(`warning: cannot read ${full}: ${error}`);
+            continue;
+        }
+        for (let i = 0; i < lines.length; i++) {
+            const marker = ANCHOR_RE.exec(lines[i]);
+            if (!marker) continue;
+            const location = `${rel}:${i + 1}`;
+            const match = NOTE_PATH_RE.exec(lines[i].slice(marker.index + marker[0].length));
+            const path = match && (match[1] ?? match[2] ?? match[3] ?? match[4]);
+            if (!path) {
+                notePathRefs.push(`${location} — Note anchor without a path under ${agentNoteRoot}`);
+                continue;
+            }
+            const candidates = candidatePaths(path, full);
+            if (candidates.length === 0) {
+                notePathRefs.push(`${location} — ${path} resolves outside notes root ${agentNoteRoot}`);
+                continue;
+            }
+            const existing = candidates.filter((candidate) => existsSync(candidate));
+            if (existing.length === 0) {
+                dangling.push(`${location} — ${path} does not exist (checked: ${candidates.join(", ")})`);
+                continue;
+            }
+            if (existing.length > 1) {
+                notePathRefs.push(`${location} — ${path} is ambiguous under ${agentNoteRoot}; use an absolute path (${existing.join(", ")})`);
+                continue;
+            }
+            const key = relative(agentNoteRoot, existing[0]).split(sep).join("/");
+            const list = anchorHits.get(key) ?? [];
+            list.push(location);
+            anchorHits.set(key, list);
+        }
+    }
 }
 
 for (const root of codeRoots) {
-  if (!existsSync(root)) {
-    console.warn(`warning: source root does not exist, skipped: ${root}`);
-    continue;
-  }
-  walk(root, 0, root);
+    if (!existsSync(root)) {
+        console.warn(`warning: source root does not exist, skipped: ${root}`);
+        continue;
+    }
+    walk(root, 0, root);
 }
 
-// implemented notes with zero inbound anchors
-const { notes } = walkAgentNoteTree();
+// 只按完整目录身份判断是否被引用；指向 proposed/ 或另一分类的同名文件不能抵消缺项。
+const { notes, errors } = walkAgentNoteTree();
+for (const error of errors) console.warn(`warning: ${error}`);
 const implemented = notes.filter((n) => n.lifecycle === "implemented");
-// basename -> note count: a slug shared by several notes is ambiguous and
-// must not let one note's anchor count for another.
-const slugCount = new Map<string, number>();
-for (const n of notes) {
-  const slug = n.rel.split("/").pop()!;
-  slugCount.set(slug, (slugCount.get(slug) ?? 0) + 1);
-}
-const unanchored: string[] = [];
-for (const n of implemented) {
-  const slug = n.rel.split("/").pop()!;
-  const direct = anchorHits.get(n.rel) ?? anchorHits.get(n.rel.replace(/\\/g, "/"));
-  const bySlug = [...anchorHits.keys()].filter((k) => k === slug || k.endsWith("/" + slug));
-  if (!direct && (bySlug.length === 0 || (slugCount.get(slug) ?? 0) > 1)) unanchored.push(n.rel);
-}
+const unanchored = implemented.filter((n) => !anchorHits.has(n.rel)).map((n) => n.rel);
 
 console.log(`scanned: ${codeRoots.join(", ")}`);
 console.log(`anchors found: ${[...anchorHits.values()].reduce((a, b) => a + b.length, 0)} across ${anchorHits.size} note(s)`);
 if (notePathRefs.length) {
-  console.log(`\n[anchors without note path] ${notePathRefs.length}`);
-  for (const r of notePathRefs.slice(0, 20)) console.log(`  - ${r}`);
+    console.log(`\n[anchors without note path] ${notePathRefs.length}`);
+    for (const r of notePathRefs.slice(0, 20)) console.log(`  - ${r}`);
 }
 if (dangling.length) {
-  console.log(`\n[dangling anchors] ${dangling.length}`);
-  for (const d of dangling.slice(0, 20)) console.log(`  - ${d}`);
+    console.log(`\n[dangling anchors] ${dangling.length}`);
+    for (const d of dangling.slice(0, 20)) console.log(`  - ${d}`);
 } else {
-  console.log("\n[dangling anchors] none");
+    console.log("\n[dangling anchors] none");
 }
 console.log(`\n[implemented notes without any code anchor] ${unanchored.length} of ${implemented.length}`);
 for (const u of unanchored.slice(0, 20)) console.log(`  - ${u}`);

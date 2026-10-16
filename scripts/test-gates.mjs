@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
 import { mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -461,14 +461,16 @@ for (const edition of EDITIONS) {
 
 // 锚点检查必须尊重 AGENT_NOTE_ROOT：笔记放在 docs/adr/ 的宿主里，真实锚点不能被当成"缺路径"。
 const anchorHost = "anchors";
+// 拼接标记，避免测试源文件中的字符串被软扫描器当成真实源码锚点。
+const anchorPrefix = ["//", "Note:"].join(" ");
 put(anchorHost, "docs/adr/implemented/bug-fix/2026-01-02-custom-root.md", IMPL("custom root"));
 put(anchorHost, "docs/adr/implemented/bug-fix/2026-01-03-dangling.md", IMPL("dangling"));
 put(anchorHost, "src/anchored.ts", [
-    "// Note: docs/adr/implemented/bug-fix/2026-01-02-custom-root.md is the decision",
+    `${anchorPrefix} docs/adr/implemented/bug-fix/2026-01-02-custom-root.md is the decision`,
     "export const a = 1;",
 ].join("\n"));
 put(anchorHost, "src/dangling.ts", [
-    "// Note: docs/adr/implemented/bug-fix/2026-01-09-missing.md",
+    `${anchorPrefix} docs/adr/implemented/bug-fix/2026-01-09-missing.md`,
     "export const b = 2;",
 ].join("\n"));
 const anchorRun = captured(anchorHost, "check-note-anchors.ts", [], {
@@ -483,6 +485,63 @@ check("anchors: anchored implemented note is not listed as unanchored", /without
 if (/anchors without note path/.test(anchorRun.stdout) || !/without any code anchor\] 1 of 2/.test(anchorRun.stdout)) {
     console.log(anchorRun.stdout, anchorRun.stderr);
 }
+
+// 每项单独建宿主，避免另一条有效锚点掩盖当前路径解析错误。
+const anchorNote = "implemented/architecture/2026-01-02-paths.md";
+// name 标识夹具；root/source 是宿主相对路径；path 中 {host}/{note} 由夹具展开；
+// diagnostic 为失败原因，省略时必须成功；outside/shadow 分别制造外部同名文件和相对路径歧义。
+const anchorCases = [
+    { name: "single-root", root: "notes", source: "src/code.ts", path: "notes/{note}" },
+    { name: "file-relative", root: "docs/adr", source: "docs/code.ts", path: "adr/{note}" },
+    { name: "parent-relative", root: "docs/adr", source: "src/code.ts", path: "../docs/adr/{note}" },
+    { name: "absolute", root: ".agents/notes", source: "src/code.ts", path: "{host}/.agents/notes/{note}" },
+    { name: "normalized", root: "docs/adr", source: "src/code.ts", path: "docs/../docs/adr/{note}" },
+    { name: "markdown-link", root: "docs/adr", source: "src/code.ts", path: "see [decision](docs/adr/{note}#decision)" },
+    { name: "quoted-space", root: "docs/my notes", source: "src/code.ts", path: "see `docs/my notes/{note}`" },
+    { name: "wrong-absolute", root: ".agents/notes", source: "src/code.ts", path: "{host}/missing/notes/{note}", diagnostic: /outside notes root/ },
+    { name: "outside-existing", root: "notes", source: "src/code.ts", path: "{host}/other/notes/{note}", outside: true, diagnostic: /outside notes root/ },
+    { name: "prefix-collision", root: "notes", source: "src/code.ts", path: "notes-other/{note}", diagnostic: /outside notes root/ },
+    { name: "escaped-root", root: "notes", source: "src/code.ts", path: "notes/../other/notes/{note}", diagnostic: /outside notes root/ },
+    { name: "wrong-lifecycle", root: "notes", source: "src/code.ts", path: "notes/proposed/architecture/2026-01-02-paths.md", diagnostic: /does not exist/ },
+    { name: "wrong-class", root: "notes", source: "src/code.ts", path: "notes/implemented/process/2026-01-02-paths.md", diagnostic: /does not exist/ },
+    { name: "fixture-filename-valid", root: "notes", source: "src/test-gates.mjs", path: "notes/{note}" },
+    { name: "fixture-filename-dangling", root: "notes", source: "src/test-gates.mjs", path: "notes/implemented/architecture/2026-01-02-missing.md", diagnostic: /does not exist/ },
+    { name: "missing-path", root: "notes", source: "src/code.ts", path: "explain why", diagnostic: /without a path/ },
+    { name: "ambiguous", root: ".", source: "src/code.ts", path: "{note}", shadow: true, diagnostic: /is ambiguous/ },
+];
+for (const { name, root, source, path, diagnostic, outside, shadow } of anchorCases) {
+    const host = `anchor-${name}`;
+    put(host, `${root}/${anchorNote}`, IMPL(name));
+    if (outside) put(host, `other/notes/${anchorNote}`, IMPL("outside"));
+    if (shadow) put(host, `src/${anchorNote}`, IMPL("shadow"));
+    const literal = path.replaceAll("{host}", join(BASE, host)).replaceAll("{note}", anchorNote);
+    put(host, source, `${anchorPrefix} ${literal}\nexport const value = 1;\n`);
+    const result = captured(host, "check-note-anchors.ts", [], {
+        AGENT_NOTE_ROOT: root,
+        AGENT_NOTE_CODE_ROOTS: dirname(join(BASE, host, source)),
+    });
+    const report = result.stdout;
+    const expectedUnanchored = diagnostic ? 1 : 0;
+    const matches = result.status === 0
+        && report.includes(`[implemented notes without any code anchor] ${expectedUnanchored} of 1`)
+        && (diagnostic ? diagnostic.test(report) : report.includes("anchors found: 1 across 1 note(s)") && report.includes("[dangling anchors] none") && !report.includes("[anchors without note path]"));
+    check(`anchors: ${name}`, matches ? 1 : 0, 1);
+    if (!matches) console.log(report, result.stderr);
+}
+
+// 多源码根只改变扫描范围，不改变仓库相对路径的基准；旧单数变量仍可用。
+put(anchorHost, "lib/second.ts", `${anchorPrefix} docs/adr/implemented/bug-fix/2026-01-03-dangling.md\n`);
+const multiRoot = captured(anchorHost, "check-note-anchors.ts", [], {
+    AGENT_NOTE_ROOT: "docs/adr",
+    AGENT_NOTE_CODE_ROOTS: ["src", "lib"].join(delimiter),
+});
+check("anchors: multiple source roots share the host root", multiRoot.status === 0 && /without any code anchor\] 0 of 2/.test(multiRoot.stdout) ? 1 : 0, 1);
+const legacyRoot = captured(anchorHost, "check-note-anchors.ts", [], {
+    AGENT_NOTE_ROOT: "docs/adr",
+    AGENT_NOTE_CODE_ROOTS: undefined,
+    AGENT_NOTE_CODE_ROOT: "lib",
+});
+check("anchors: legacy source root remains supported", legacyRoot.status === 0 && /anchors found: 1 across 1 note/.test(legacyRoot.stdout) && /without any code anchor\] 1 of 2/.test(legacyRoot.stdout) ? 1 : 0, 1);
 
 // 本仓库的 `-en.md` 双语笔记是自觉的例外，但没有机制就会漂移；守卫必须抓住结构不同步。
 const pairHost = "pairs";

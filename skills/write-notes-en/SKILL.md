@@ -1,203 +1,89 @@
 ---
 name: write-notes-en
-description: Use when a change is non-trivial (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates. Mechanical edits need no new note, but affected existing facts stay synchronized. English edition.
+description: Record durable engineering decisions, constraints, and rejected alternatives; maintain existing decision notes as code changes. Use for new or revised technical choices, cross-module contracts, postmortems, explicit note maintenance, and decision-note boards. Ordinary local fixes need no new note unless they introduce a lasting constraint or tradeoff. English edition.
 ---
 
-# Write Notes (English edition)
+# Write Notes
 
-> The chat agent breaks work down and sequences it; this skill does exactly one thing: keep *why this change*, *what was given up*, and *how we know it works* in one place, for whoever edits this code next.
+Keep why a decision exists, what was rejected, and how it was verified discoverable beside the code. Follow the user's instructions and the host's `AGENTS.md` or `CLAUDE.md` first.
 
-## Hard gate: decide whether to write at all, before deciding how
+## 0. Establish the host convention
 
-Models have a completionist streak and reach for a note far too readily. Pass this gate first.
+Read the host guide and find its existing decision records before creating directories.
 
-**Choose among three actions: no new note, update an existing note, or create a note. The following mechanical or local changes need no new note. Still update affected paths, symbols, or parameters in existing notes; when no note covers them, change the code directly:**
+- **Existing ADR or other decision format:** preserve its location, filenames, headers, statuses, indexes, and validation commands. Apply this skill's decision-writing guidance within that format. Do not impose the skill's directory tree, gates, archive seals, or board parser on incompatible records.
+- **Already using this skill's format:** keep the configured note root and run its checks.
+- **No existing convention:** use `.agents/notes/` when a note is actually needed; create only the directories used. A routine fix does not initialize an empty note tree.
 
-- Pure reformatting, typo fixes, unambiguous renames
-- Style-only changes (no behavior change)
-- Dependency patches (no behavior change), release tagging (RC/Release tags)
-- Routine CRUD, and explicit logic fixes within one module that are obvious from the diff (no cross-file impact)
+`AGENT_NOTE_ROOT` changes the root directory only; it does not adapt flat ADRs or other schemas. Migrate an existing collection only within an explicitly authorized migration scope. See [verification and adoption](references/verification.md).
 
-**The bar: non-trivial changes must be written down.** Hitting *any* of the following makes a change non-trivial — it changes **behavior**, changes **architecture**, changes a **cross-file contract**, changes **process or tooling**, changes **testing strategy**, or changes an **on-disk / wire / config format** — or it is a decision other maintainers will plausibly revisit later.
+## 1. Choose no note, update, or create
 
-**Before writing, work out which direction this note guards:**
+Search for the owning decision before choosing an action. Apply these rules in order:
 
-1. **Looking forward (laying down a rule)** — a new cross-module communication contract, state-transition rule, access boundary, runtime invariant. Unrecorded, later agents each invent their own and punch through module boundaries.
-2. **Looking back (recording a compromise)** — a mainstream or intuitive solution given up for a constraint nobody can see. Unrecorded, the rejected path gets walked again.
-3. **Subtracting (narrowing)** — breaking refactors, code removal, shrinking a public surface. Unrecorded, nobody knows the exit conditions or migration boundary, so the subtraction stalls — or overshoots.
-
-One line to remember: **intent, boundaries and trade-offs that code and unit tests cannot express are what make a change non-trivial.** When you cannot tell, err toward writing.
-
-> To an AI, a rule written in prose is not a rule. Every discipline that *can* be checked mechanically has a script behind it (see §6). Decision reversals, auditing on the spot, and present-tense prose ride on the operating procedure, not on lexical scanning.
-> Precedence: the host project's `AGENTS.md` / `CLAUDE.md` and direct user instructions **outrank this skill**. This skill is a default contract, not a higher law.
-
-| The excuse | The reality |
+| Situation | Action |
 |---|---|
-| "It's just a default value / a rename" | Defaults and names are decision facts; updating the owning note in place takes 30 seconds |
-| "Merge now, backfill later" | Later means never; rot starts with every "backfill later" |
-| "The code is the documentation" | Code says **what**, never **why** or **what was given up** |
-| "It's too small to matter" | Small ≠ exempt; one retry parameter once took down a whole service |
-| "I'm not sure it needs a note" | Check the non-trivial list above: it hits, you write; it doesn't, you don't. Don't hide behind this sentence |
+| An existing note owns the choice; only facts such as paths, symbols, or parameter values change | Update that note in place, even for an otherwise mechanical edit |
+| The decision or its rationale changes | Create a new decision and link it to the old one; preserve the old reasoning |
+| No owning note; the change introduces a durable constraint, contract, or tradeoff that code and tests do not explain | Create a note |
+| No affected decision facts and no new lasting rationale | Change the code without a new note |
 
-- **Prefer updating in place; create a file only when you must.** These note trees evolve the same way everywhere: few new notes, and the bulk of change is correcting facts (paths, class names, default values) in existing notes rather than opening new files. If a note already owns the decision, update that one.
-- **Never rewrite a note into a different decision.** Facts (paths, symbols, defaults) are edited in place; when the decision or the reasoning flips → open a new note and cross-link. Never rewrite `## Decision` into its opposite, and never let git be the only copy of the old reasoning.
-- **Audit the moment you write a new note; never defer it.** Search proposed + implemented + rejected by module name and keywords; classify every hit on the spot: unrelated / partially overlapping (cross-link) / fully absorbed (delete or archive) / stale proposal (reject or delete). The classification lands with the new note.
-- **No junk in the archive.** A stale proposal becomes `Status: rejected — <reason>` (never archive it); a rejected record with no trap value gets physically deleted.
+**A behavior change alone does not require a note.** A local bug fix restoring the documented contract, routine CRUD, formatting, styling, an obvious rename, or a dependency patch needs no new note when the diff and tests explain it. A one-line retry default can still need a note when it encodes a consequential operational compromise. File count and change size are not thresholds.
 
-> A "decision" is not heavy. On a personal project it is just "why A and not B". Choices, trade-offs, and pitfalls you hit are all worth writing down.
+For a new decision, capture the hidden constraint or rejected alternative, a boundary other modules must follow, or the conditions for removing an old capability. Do not turn a task log into a decision record. Examples and interaction guidance are in [when to write](references/when-to-write.md).
 
-## 0. Probe the repository before landing anything
+## 2. Use the applicable format
 
-Do not open with creating a full directory tree. Choose based on what this repository already looks like:
+For the skill's own format, identity is `{lifecycle}/{class}/yyyy-mm-dd-topic.md` under the note root. Keep the first-proposed date across moves. Do not create a centralized `INDEX.md` in this format.
 
-1. If there is an `AGENTS.md` / `CLAUDE.md` / contributing guide → read it. If decisions are already recorded somewhere (`docs/adr/`, `docs/decisions/`, an issue template) → follow that convention; only the statuses and classes come from this skill.
-2. If there is no existing decision log → create the standard structure: `.agents/notes/{proposed,implemented,rejected,archived} × 6 classes`. Create directories as you need them; do not pre-create empty ones — and even for a solo project with no git, build the full structure rather than collapsing it to a single directory.
-3. For a long-lived team repository → layer process on the same structure: add "significant changes must ship with a note" to `CONTRIBUTING.md` and the PR template, and wire the verification scripts into CI.
+- Lifecycle: `proposed` = not implemented; `implemented` = in effect; `rejected` = deliberately declined; `archived` = an immutable implemented snapshot.
+- Class: `feature`, `bug-fix`, `simplification`, `architecture`, `process`, or `testing`. Choose a class only after deciding a note is needed; see [classification](references/classification.md).
 
-## 1. The path is the classification
+The first three lines are `# Agent Note: <title>`, a blank line, and `Status: <status>`, followed by a blank line. Status must match the directory; rejected status includes a reason.
 
-A note's path *is* its identity: `{lifecycle}/{class}/yyyy-mm-dd-topic.md`
+- Proposed: `Problem`, `Proposal`, `Alternatives considered`, `Acceptance criteria`, `Risks`.
+- Implemented: `Problem`, `Decision`, `Alternatives considered`, `Consequences`; optional verification and design sections.
+- Rejected: retain the proposal and put the verdict on the status line.
 
-**Lifecycle (first-level folder — how far this note has got):**
+Use H2 headings. `Problem` comes first. Use present tense for implemented decisions; remove proposal-era sections. See [format and supported aliases](references/note-format.md) and `templates/`. Host ADRs keep their own skeleton instead.
 
-- `proposed` — still an idea; a plan exists but is not implemented
-- `implemented` — landed, kept in sync with the code in the same change
-- `rejected` — deliberately turned down; keep only while it prevents a repeat, otherwise delete the whole thing
-- `archived` — implemented records that are done and have little future reference value; frozen and immutable
+## 3. Retrieve and reconcile
 
-**Class (second-level folder — exactly these 6; adding more means editing the checking scripts):**
+Follow existing source anchors or module-document links, slice the lifecycle/class tree, then search relevant keywords with `rg --hidden`, excluding the root's `archived/` directory. For a custom root, use that actual path in both the search and exclusion. Read supersession links before treating an old decision as current.
 
-- `feature` — new capability: choices visible to users or the model (non-obvious behavior counts)
-- `bug-fix` — defects fixed, or gaps exposed by a postmortem and then closed
-- `simplification` — subtract only: no new capability, just removing code, behavior or surface
-- `architecture` — how the shipped source is organized: packages, boundaries, dependencies
-- `process` — tooling and workflow around the code: checks, releases, collaboration
-- `testing` — test strategy and infrastructure
+Before creating a note, classify related records: unrelated; partial overlap requiring links; fully absorbed; or an unimplemented proposal deliberately abandoned. Record relevant overlap handling with the new decision. Do not add source anchors just to enable retrieval.
 
-> `refactor` is not a class of its own: if observable behavior changed, it belongs to the matching class; if nothing changed, it is `simplification`. Do not create an `INDEX.md`. Detailed judgment calls are in `references/classification.md`.
+## 4. Keep lifecycle and reasoning accurate
 
-## 2. File format (the checking scripts verify this)
+- When authorized implementation completes, move the proposal to `implemented`, preserve its date, rewrite `Proposal` as `Decision`, and fold acceptance criteria and risks into consequences or verification. Ship this with the code.
+- No remaining work after implementation means **implemented**, not rejected. Use rejected only for an unimplemented choice actually declined; keep it only if its rationale prevents a repeat.
+- Partial replacement: keep both records, cross-link, and prominently identify the superseded portion and its successor at the start of `Problem`. Preserve the still-valid decision and old rationale.
+- Full replacement: absorb unique reasoning, alternatives, consequences, and verification limits; fix incoming links. Delete the old active record when fully absorbed, or archive only if independent historical value remains.
+- Archive only implemented notes through `scripts/archive-agent-note.ts`. Never rewrite a frozen snapshot. Local seals show consistency; CI needs a pre-change Git baseline to detect rewritten history. Read [archiving](references/archiving.md) before archive, delete, or reseal operations.
 
-The first three lines are fixed:
+## 5. Write and review the substance
 
-```markdown
-# Agent Note: <title>
+Record only alternatives actually considered; there is no minimum count. Give each its strongest case before explaining the rejection. Explain benefits, costs, limits, and concrete verification. Use relative Markdown links between notes.
 
-Status: <status>
-```
+Ask only about unresolved material choices; inspect available facts yourself and proceed with work already authorized. A new note does not create another approval requirement.
 
-The status must match the lifecycle folder the note sits in (`rejected` carries a one-line reason), and the date in the filename is the day it was **first proposed**. Body skeleton:
+After editing notes, use the host's applicable checks and the [semantic self-check](references/quality-gate.md). Report results and remaining gaps briefly. Use [prose guidance](references/prose-checklist.md) or [simplification guidance](references/simplification-checklist.md) only when relevant.
 
-- `proposed`: `## Problem` → `## Proposal` → …free sections… → `## Alternatives considered` → `## Acceptance criteria` → `## Risks`
-- `implemented`: `## Problem` → `## Decision` (present tense) → …free sections… → `## Alternatives considered` → `## Consequences`
-- `rejected`: the frozen proposal shape, with the verdict on the `Status:` line
+## 6. Run checks or generate a board
 
-> Alternatives are mandatory: record only the rival options genuinely considered, and state each one's strongest case before rejecting it. Never invent an option that was not on the table. "Do nothing / keep the status quo" counts only if it was actually weighed. The script only checks that the section exists (`## Alternatives considered`, or the Chinese aliases accepted so far: `## 替代方案` / `## 已考虑的替代方案` / `## 备选方案` / `## 备选` — the authoritative list is `scripts/note-sections.ts`).
-> The first section must be `## Problem` (Chinese `## 问题` is also accepted, and a fully Chinese skeleton passes the gate: `## 问题` / `## 决策` / `## 备选方案` / `## 后果`). `## Decision` in an `implemented` note is present tense. The gate rejects only proposal-era headings (`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria` and their Chinese aliases). Details in `references/note-format.md`.
-
-Templates are in `templates/`.
-
-## 3. Look up past decisions before you start (four decentralized moves)
-
-Before a refactor or a technology choice, check the historical constraints so you neither repeat a pitfall nor break a predecessor's compromise:
-
-1. **Entry-point comments, if the host has them.** If a code entry point already carries `// Note: ... see .agents/notes/...`, follow it. If not, use the three moves below — do not add anchors just to make searching work.
-2. **Slice the tree physically.** Do not scan everything; cut straight to the directory your intent implies (architecture → `implemented/architecture/`, pitfalls → `rejected/`).
-3. **Precise global search.** Use ripgrep for the mechanism or keyword name, **always with `--hidden` and excluding `archived/`**:
-   ```bash
-   rg --hidden --glob '!.agents/notes/archived/**' "<mechanism or keyword>" .agents/notes/
-   ```
-4. **Drill down through module docs.** When a submodule README discusses design rationale, follow its relative markdown links to the note.
-
-**Look it up yourself before asking the user.** Facts the four moves can answer are not the user's problem; only real decisions deserve their time.
-
-## 4. When to write, and when to update
-
-**Triggers in conversation** — when the user or you say something like this, it is time to pick up the pen (excluding the mechanical list in the hard gate at the top; do not use these phrases as an excuse to over-record):
-
-- Settling on a direction: "let's go with X", "we'll use X", "we'll run X for now" → write a note
-- Mid-comparison: "X or Y", "why do you lean X" → record the alternatives
-- The same reasoning explained a second time → it should have been written down
-
-Judgment and operating procedure:
-
-- **Refactoring existing architecture / moving paths / changing parameters** → **update in place first**: correct the facts (code path, method signature, default value) inside the note that already owns the decision. Do not open a new note, and do not append a changelog to the body. If `## Decision`'s core reasoning is unchanged, edit in place; if the reasoning changed, open a new note.
-- **Before writing a new note** → search the active notes by module name and keyword and classify on the spot (see "audit on the spot" above). Deferring this to a later cleanup is forbidden.
-- **A new idea, not yet built** → write `proposed` first (why this approach, which alternatives were considered), then build once it has been reviewed. Interaction discipline below.
-- **After building (proposed → implemented)**, in the same change: ① move it to `implemented/<class>/`, keeping the filename date; ② `Status: proposed` → `Status: implemented`; ③ `## Proposal` → present-tense `## Decision`; ④ fold `## Acceptance criteria` / `## Risks` into `## Consequences` (or a present-tense `## Testing`); ⑤ delete the planning sections. Land it together with the code — **with git, that means the same commit/PR**.
-- **A new decision partially supersedes this one** → keep both, cross-link them both ways, and update only the facts that still hold. Archiving is forbidden here.
-- **A new decision fully supersedes it** → the new note takes over and absorbs every unique piece of reasoning, alternative, consequence and verification gap; once inbound links are fixed, delete the old note if you can, and only run `archive-agent-note.ts` if it still carries independent leverage. The pointer goes in the new note, never in the archived one.
-- **No-new-note cases**: use the opening checklist; update affected facts in existing notes alongside the code.
-
-**Interaction protocol (when you need to ask the user):**
-
-1. **Separate facts from decisions first.** Facts available in the environment (code, the note tree, ripgrep) are yours to find; only genuine calls on the merits cost the user time.
-2. **Ask everything in one round.** List every open question with a number, one per line, each with a recommended answer `➡️ <recommendation>`; the user answers in bulk by number ("1 yes, 2 the second option"). Do not drip-feed questions or feel your way along.
-3. **Confirm only unresolved material choices.** When scope, compatibility, or significant risk needs a decision the user has not authorized, complete independent investigation and a reviewable draft first, then ask about the remaining choices together. Proceed with explicit choices and already authorized work without requesting confirmation again; record those choices in the note.
-4. **More than five open decisions is a signal, not a quota.** It means the change is too large — split it into several notes, or submit a `proposed` draft for review. Do not force it into one conversation.
-
-> Judgment details are in `references/when-to-write.md`; archiving and deletion in `references/archiving.md`.
-
-## 5. How to write it well
-
-- `## Consequences` records **costs and benefits**, not just "what was given up".
-- Free sections (package topology, wire contracts, schemas) go between `Decision` and `Alternatives`, keeping searchable mechanism names and `must / may / never` timing emphasis.
-- Cross-note references use relative markdown links `[topic](../../implemented/architecture/2026-…-….md)`, never bare numbers, so they can be checked mechanically.
-- If the host already has the convention, a core entry point may carry one line `// Note: ... see .agents/notes/...`; this is not a gate. When a decision is superseded, those comments are part of the code checklist to update.
-- Voice and de-jargoning: `references/prose-checklist.md`; simplification opportunities: `references/simplification-checklist.md`.
-- When the note is written, run `references/quality-gate.md`'s semantic self-check and report **only the gaps and what is solid** to the user (≤5 lines), giving a concrete fix for each gap. Structure is the script's job; meaning needs a human nod.
-
-## 6. Verification and maintenance commands
-
-Run these from the repository root (once the npm scripts are configured):
+Run scripts from the **host root**, using the directory of the loaded `SKILL.md` as `NOTE_SKILL_DIR`. Node.js 24 runs them directly; a host `package.json` is not required. Only run the following gates for records adopting this skill's format:
 
 ```sh
-npm run verify-agent-note-tree     # directory legality, classes, filenames, relative links (fails on an empty root)
-npm run verify-agent-note-format   # head block, status, required sections, alternatives, proposal headings banned in implemented
-npm run verify-archived            # archived notes: head layout, classes, seals and the append-only seal history
-npm run verify-notes               # all three in sequence (use this in CI)
-npm run archive-agent-note -- <path> [--superseded-by <new note>] [--strict]  # move + seal + inbound link report
-npm run reseal-notes               # deliberately re-adopt edited archived content (prints what changed)
-npm run check-anchors              # soft report: if code carries // Note: anchors, cross-check both directions; not a CI gate
-npm run init-board                 # generate the lightweight board.html (recommended for daily use)
-npm run bundle-board               # pack a self-contained demo.html with all note data inlined
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-tree.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-format.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts"
 ```
 
-> Language editions: this repository ships a Chinese edition (`write-notes`) and this English one (`write-notes-en`). Both share the same verification logic — note format, directory layout and status words are English identifiers, independent of the language you write notes in. **The board's UI wording is currently Chinese only**: the English edition reuses the same `assets/agent-notes-board.html`. To get an English board, localize that single file — both editions reference it, so the change applies to both.
-
-**The limits of a seal (do not mistake it for tamper-proofing)**: `manifest.json` and `.seal-ledger.json` live inside the same repository, so anyone with write access can rewrite them along with the content. A local seal only *leaves evidence*. Real proof comes from an external witness — point `AGENT_NOTE_ARCHIVE_BASE_REF` at the pre-change commit in CI. That is why both seal files must be committed and must fall inside CI's comparison range. `--write` only ever adds; it never re-seals already-sealed content. Adopting an edit requires the explicit `--reseal`, and the commit message should say why.
-
-The scripts live in this skill's `scripts/` and are invoked from the **host project root**; by default they check `.agents/notes/` under the current directory. Determine the skill's location from the loaded `SKILL.md` path; do not assume the host root has a `scripts/`, and do not `cd` into the skill directory. Installing the skill does not configure the host's npm scripts.
-
-**This skill is harness-agnostic**: any agent that can read `SKILL.md` can use it. The note format, directory layout, status words and gate scripts depend on no particular harness. The install location, however, is chosen by the harness — never assume one:
-
-| Harness | Project-level skill directory |
-|---|---|
-| Codex, Gemini CLI, GitHub Copilot, Cursor, OpenCode, … | `.agents/skills/` (the shared, universal directory) |
-| Claude Code, Windsurf | `.claude/skills/`, `.windsurf/skills/` — the installer typically creates a symlink to the universal directory, so both paths show the same content |
-
-So **read the real path before using it** — the location `SKILL.md` was loaded from is the authority. With a project-level install in the universal directory you can call the scripts directly:
+For an explicitly requested decision board, use the same installed scripts:
 
 ```sh
-npx tsx .agents/skills/write-notes-en/scripts/verify-agent-note-tree.ts
-npx tsx .agents/skills/write-notes-en/scripts/verify-agent-note-format.ts
-npx tsx .agents/skills/write-notes-en/scripts/verify-archived-agent-notes.ts
-npx tsx .agents/skills/write-notes-en/scripts/build-board.ts --init board.html "Decision board"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --init board.html "Decision Board"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --bundle .agents/notes demo.html "Decision Board"
 ```
 
-Loaded from `.claude/skills/`, a global directory, or anywhere else? Substitute that prefix. Board packing takes `--bundle <notes-dir> <output.html> "<name>"`; flags and the immunity rules are in `references/verification.md`.
-
-For a team, copy this skill's `templates/verify-notes.yml` into the host repository's `.github/workflows/verify-notes.yml`, adjust the paths to the real install location, and commit the project-level skill files alongside it; the template does nothing while it sits inside the skill directory. You can also add "significant changes must ship with a note" to `CONTRIBUTING.md` or the PR template.
-
-## References
-
-Load on demand:
-
-- `references/note-format.md` — head block and body skeleton in detail
-- `references/classification.md` — the 6 classes and their boundaries
-- `references/when-to-write.md` — when to create / update / transition
-- `references/archiving.md` — archiving and merge-then-delete (including the "future reference value" test)
-- `references/prose-checklist.md` — voice and de-leaking self-check
-- `references/simplification-checklist.md` — simplification opportunity self-check
-- `references/quality-gate.md` — post-write semantic self-check: Problem / Alternatives / Consequences / Verification, plus the reporting format
-- `references/verification.md` — what each checking script verifies, and why
+`--init` creates a local-directory viewer; `--bundle` embeds the selected note tree. Substitute the actual root for custom layouts compatible with this format. The shared board UI is Chinese in both editions. Installation paths, optional npm shortcuts, CI, overwrite behavior, archive commands, and bundle options are in [verification](references/verification.md).

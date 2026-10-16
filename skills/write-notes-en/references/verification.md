@@ -1,8 +1,28 @@
 # Read as needed: Verification scripts
 
-> The deep dive behind SKILL §6. Check against it when wiring up CI; skip it for lightweight local use.
+> Read when adopting gates, locating installed scripts, generating a board, or configuring CI.
 
-## Check scripts (all tsx, zero new dependencies, each runnable standalone with `npx tsx`)
+## Existing ADRs versus this skill's format
+
+The supplied gates and board parser require `{lifecycle}/{class}/yyyy-mm-dd-topic.md` and the Agent Note header and sections. `AGENT_NOTE_ROOT=docs/adr` changes only the root; it does not make `docs/adr/0001-database.md` compatible. Keep the host's naming, status vocabulary, index and validation commands when it already has a different convention. If it has no validator, inspect its records against the host template and report that review; do not claim the bundled gates passed or run them against an incompatible collection.
+
+Adopting the strict format is a separate, authorized migration: establish the target root, path/date/status mapping, preserved reasoning, and incoming-link changes first. Do not silently reorganize history or create a parallel note library. Empty-root checks remain errors; a host-format review is not an exception inside those checks.
+
+## Locate and run the installed scripts
+
+Use the directory of the loaded `SKILL.md`; installations can be project-local or global. Keep cwd at the host root. Set `NOTE_SKILL_DIR` to that actual directory, not to the host's `scripts/`. Node.js 24 runs the TypeScript scripts directly without a host `package.json`:
+
+```sh
+# Example only: substitute the actual installed skill path.
+NOTE_SKILL_DIR="$HOME/.codex/skills/write-notes-en"
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-tree.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-agent-note-format.ts"
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts"
+```
+
+If the host already uses `tsx`, `npx tsx <script>` is also supported; npx may download the runner. Installing the skill does not add npm commands. Use `npm run verify-notes` or `npm run init-board` only after confirming that the host's `package.json` defines them. Do not create a package manifest solely to run these scripts.
+
+## Check scripts
 
 1. **`verify-agent-note-tree`** (`scripts/agent-note-tree.ts` + `scripts/verify-agent-note-tree.ts`)
    - Verifies the closed lifecycle set `proposed/implemented/rejected` + `archived`, the 6-class closed set, the path depth `{lifecycle}/{class}/file.md`, the filename form `yyyy-mm-dd-topic.md`, the ban on `INDEX.md`, and the validity of relative Markdown links among active notes.
@@ -23,7 +43,8 @@
    - **Degraded mode must be loud**: without an explicit baseline, when git is absent or cannot run (sandbox, permissions), it prints an explicit "external witness missing" warning instead of passing silently. The seal history lives inside this repo; only an external baseline can truly prove that nobody changed it.
 
 4. **`check-note-anchors`** (`scripts/check-note-anchors.ts`, soft report, exit code always 0, **not in CI**)
-   - Scans source code (roots given by the env var `AGENT_NOTE_CODE_ROOTS` — several paths separated by the platform path delimiter; the legacy singular `AGENT_NOTE_CODE_ROOT` is still honoured; default cwd; node_modules/.git/dist and the like are skipped automatically) for physical `// Note:` / `# Note:` anchors: it reports dangling anchors, implemented notes that no anchor points at, and anchor lines missing their path. Anchors are recognised from the notes root's own directory name plus the `{lifecycle}/{class}/file.md` triple, so a host that keeps its notes outside `.agents/notes/` (for example `docs/adr/`) is scanned with its real prefix and absolute, repo-relative and file-relative anchor spellings all resolve to the same note. If the host does not use anchors, there is no need to run it.
+   - Scans source code for physical `// Note:` / `# Note:` anchors. `AGENT_NOTE_CODE_ROOTS` accepts paths separated by the platform path delimiter; the legacy singular `AGENT_NOTE_CODE_ROOT` is still honoured, defaulting to cwd. Hidden directories, node_modules, dist and similar output directories are skipped; individual filenames receive no exemption. The first Markdown path after each marker is resolved in full: absolute paths directly, relative paths against both the host root (cwd) and the source file's directory. A normalized path must stay inside `AGENT_NOTE_ROOT` and identify exactly one existing target. If the two bases identify different files, the report asks for an absolute path. Reports missing paths, paths outside the root, ambiguity, dangling references, and unanchored implemented notes; never substitutes a matching filename or suffix.
+   - With `AGENT_NOTE_ROOT=docs/adr`, both the repo-relative `docs/adr/implemented/architecture/2026-01-02-example.md` and the file-relative `adr/implemented/architecture/2026-01-02-example.md` inside `docs/code.ts` are valid. Quote paths containing spaces, using quotes or backticks. Markdown links are supported and `#fragment` is ignored. This is a line-based text scan, not a language parser; construct fixture markers from separate strings to avoid treating examples as real comments. If the host does not use anchors, there is no need to run it.
 
 5. **`verify-bilingual-notes`** (`scripts/verify-bilingual-notes.ts`, optional, used by this repository itself)
    - A project that keeps its own bilingual notes outside the `<base>.md` + `<base>.zh.md` convention can compare the two sides mechanically: this script checks that an English note sharing a base filename agrees with its base note on the `## ` heading sequence, the first-proposed date and the status line. It does not compare prose meaning. Wire it into your own pipeline only if you adopt such a convention; the three gates above stay the host's contract.
@@ -42,6 +63,24 @@ The gates check base notes and their optional `.zh.md` counterparts independentl
 ## Script paths
 
 `scripts/` in this document is relative to the skill's install directory. When running commands, keep the current directory at the host project root and invoke the scripts with the actual skill path; the install itself does not create host npm scripts.
+
+## Board and archive commands
+
+For a compatible note tree, use the same `NOTE_SKILL_DIR` from above:
+
+```sh
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --init board.html "Decision Board"
+node "$NOTE_SKILL_DIR/scripts/build-board.ts" --bundle .agents/notes demo.html "Decision Board"
+node "$NOTE_SKILL_DIR/scripts/check-note-anchors.ts"
+node "$NOTE_SKILL_DIR/scripts/archive-agent-note.ts" .agents/notes/implemented/architecture/2026-01-01-example.md --strict
+node "$NOTE_SKILL_DIR/scripts/verify-archived-agent-notes.ts" --reseal
+```
+
+Choose only the command needed; resealing explicitly adopts edited archive content and is not routine validation. Archive eligibility, `--superseded-by`, incoming links and deletion are covered in [archiving](archiving.md).
+
+`--init` emits a viewer; open it and select the note directory. `--bundle` embeds the specified tree, so replace `.agents/notes` for a custom compatible root. It includes full note bodies by default; `--metadata-only` omits bodies and reasoning. Neither mode converts flat ADRs or needs npm initialization. The board UI is Chinese in both editions. Existing generated boards may be regenerated; an unrelated output file is rejected unless `--force` is explicitly requested.
+
+For CI, copy `templates/verify-notes.yml` into the host's `.github/workflows/`, adjust the installed paths, and commit the referenced skill files. The template has no effect inside the skill directory. Optional npm shortcuts wrap these scripts. Configure `AGENT_NOTE_ARCHIVE_BASE_REF` to the pre-change commit and commit both seal files together. Local seals in a writable repository cannot independently establish that history was never rewritten.
 
 ## Consistency and failure rules
 
